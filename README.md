@@ -1,36 +1,98 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Silicon Pulse
 
-## Getting Started
+[![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](./LICENSE)
 
-First, run the development server:
+**Silicon Pulse** is a small research dashboard for running the *same* original survey battery across many LLMs over time - baseline (no news) and optional left / balanced / right news briefs before the same questions. The pipeline is designed to run on a schedule: update the model list, build digests, call models, classify open-ended answers into coarse themes, and optionally generate a short run briefing. The site is meant to read like an autonomous panel: what you see are **model completions**, not human poll results.
+
+I built it to watch how answers cluster, how they move when the information environment changes, and how that shifts between runs when the underlying model roster changes.
+
+---
+
+## What you get
+
+- **Next.js** UI: latest run snapshot, answer overview, per-question breakdowns, longitudinal stacks, pairwise comparison, model registry
+- **Supabase** for surveys, runs, responses, briefs, and optional run digests
+- **OpenRouter** for model calls; registry sync picks from active text-capable models (with caps: baseline surveys up to 50 models, informed/news conditions up to 15 per slice to keep spend predictable)
+- **RSS → briefs** script for the three informed feeds
+- **Post-run** theme classification for the open “priorities” item and an optional **digest** article authored by a designated model from aggregate stats
+
+Nothing here is legal, medical, or electoral advice - see the in-app **About → Disclaimer** before relying on anything for decisions.
+
+---
+
+## Quick start
+
+**Prerequisites:** Node 20+, a [Supabase](https://supabase.com) project, and an [OpenRouter](https://openrouter.ai) API key.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone https://github.com/MaxMLang/silicon-pulse.git
+cd silicon-pulse
+npm install
+cp .env.local.example .env.local
+# Fill in Supabase URL, anon key, service role key, OpenRouter key
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Apply SQL migrations in order (`supabase/migrations/`) in the Supabase SQL editor - start with `001`, then `002` if your project needs it, then `003` if you use run digests.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run update-models
+npm run build-briefs
+npm run run-survey
+npm run classify-priority-themes
+npm run generate-run-digest   # optional
+npm run dev
+# http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Or one shot: `npm run full-run` (runs the shell script that chains the steps above in order).
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Scheduled runs (GitHub Actions)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The repo includes [`.github/workflows/survey-run.yml`](.github/workflows/survey-run.yml). It wakes **every day at 09:00 UTC**, but the survey only runs when the schedule says so:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Set **`burstStart`** in [`survey-schedule.json`](./survey-schedule.json) to an ISO date (`"YYYY-MM-DD"`, interpreted in UTC) on the **first day** you want the initial **7-day daily** data-gathering window. After that week (seven calendar days starting that day), scheduled runs switch to **Mondays only** at the same time.
+- Leave **`burstStart` as `null`** to skip the burst and use **weekly Mondays only** from the start.
+- **Bootstrap:** scheduled runs do nothing until the **`runs`** table has at least one row. After deploy, run **Survey run** manually once (`workflow_dispatch`); after that, the cron can run according to the rules above. Manual runs always execute the full pipeline.
 
-## Deploy on Vercel
+You can always run the pipeline manually (`workflow_dispatch`); that ignores the calendar gate and bootstrap. Set these **repository secrets**:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Secret | Purpose |
+|--------|---------|
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key (used where the client expects it) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role - required for scripts |
+| `OPENROUTER_API_KEY` | Model API |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+To use a different **steady-state** cadence than weekly Mondays, adjust the `Schedule gate` step and/or the cron in the workflow, or disable the schedule and run manually.
+
+---
+
+## Project layout
+
+```
+silicon-pulse/
+├── src/app/           # Next.js App Router pages
+├── src/components/    # UI
+├── src/lib/           # Types, Supabase client, queries
+├── scripts/           # update-models, build-briefs, run-survey, classify, digest
+├── supabase/migrations/
+├── survey-schedule.json  # GitHub Actions: burst window for daily-then-weekly runs
+└── scripts/full-run.sh
+```
+
+---
+
+## Contributing & citation
+
+Issues and PRs are welcome. If you use this in academic work, cite the repository and the run date you used. The codebase is under the **MIT License** - see [`LICENSE`](./LICENSE). Underlying news text and third-party APIs remain subject to their own terms.
+
+---
+
+## Author
+
+**MaxMLang** - [GitHub](https://github.com/MaxMLang)
