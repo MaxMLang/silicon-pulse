@@ -16,12 +16,15 @@ jobs:
   full-run:
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    env:
+      # Use Node 24 for JavaScript-based actions (checkout, setup-node) per GitHub deprecation of Node 20.
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install

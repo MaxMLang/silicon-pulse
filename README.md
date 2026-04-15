@@ -53,7 +53,7 @@ Or one shot: `npm run full-run` (runs the shell script that chains the steps abo
 
 ## Scheduled runs (GitHub Actions)
 
-The repo includes [`.github/workflows/survey-run.yml`](.github/workflows/survey-run.yml). It wakes **every day at 09:00 UTC**, but the survey only runs when the schedule says so:
+The repo includes [`.github/workflows/survey-run.yml`](.github/workflows/survey-run.yml). The job uses **Node.js 24** and sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` so Actions stays on a supported runtime as GitHub phases out Node 20. It wakes **every day at 09:00 UTC**, but the survey only runs when the schedule says so:
 
 - Set **`burstStart`** in [`survey-schedule.json`](./survey-schedule.json) to an ISO date (`"YYYY-MM-DD"`, interpreted in UTC) on the **first day** you want the initial **7-day daily** data-gathering window. After that week (seven calendar days starting that day), scheduled runs switch to **Mondays only** at the same time.
 - Leave **`burstStart` as `null`** to skip the burst and use **weekly Mondays only** from the start.
