@@ -1,0 +1,107 @@
+# Scheduled survey pipeline - requires repository secrets (see README).
+name: Survey run
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Daily 09:00 UTC; the "Schedule gate" step runs the pipeline every day only
+    # during the burst window in survey-schedule.json, then on Mondays only.
+    - cron: '0 9 * * *'
+
+concurrency:
+  group: survey-run
+  cancel-in-progress: false
+
+jobs:
+  full-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: Write environment
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          test -n "$NEXT_PUBLIC_SUPABASE_URL" || (echo "Missing NEXT_PUBLIC_SUPABASE_URL secret" && exit 1)
+          test -n "$SUPABASE_SERVICE_ROLE_KEY" || (echo "Missing SUPABASE_SERVICE_ROLE_KEY secret" && exit 1)
+          test -n "$OPENROUTER_API_KEY" || (echo "Missing OPENROUTER_API_KEY secret" && exit 1)
+          cat > .env.local <<EOF
+          NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
+          SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
+          OPENROUTER_API_KEY=$OPENROUTER_API_KEY
+          EOF
+
+      - name: Schedule gate
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "Manual run: should_run=true (ignores calendar gate and bootstrap)"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Bootstrap: do not run on schedule until at least one survey run exists (trigger manually first).
+          base="${SUPABASE_URL%/}"
+          resp=$(curl -fsS "${base}/rest/v1/runs?select=id&limit=1" \
+            -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+            -H "Accept: application/json")
+          n=$(echo "$resp" | jq 'length')
+          if [ "$n" -eq 0 ]; then
+            echo "Bootstrap: no rows in runs yet - skipping scheduled run. Trigger Survey run manually once in the Actions tab."
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BURST_START=$(jq -r '.burstStart // empty' survey-schedule.json)
+          today=$(date -u +%Y-%m-%d)
+
+          if [ -z "$BURST_START" ] || [ "$BURST_START" = "null" ]; then
+            echo "No burstStart: weekly on Monday UTC only"
+            if [ "$(date -u +%u)" = "1" ]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+            exit 0
+          fi
+
+          burst_end=$(date -u -d "$BURST_START + 7 days" +%Y-%m-%d)
+          echo "burstStart=$BURST_START burst_end=$burst_end (exclusive) today=$today"
+
+          if [[ "$today" < "$BURST_START" ]]; then
+            echo "Before burst window: skip"
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+          elif [[ "$today" < "$burst_end" ]]; then
+            echo "Inside burst window: daily run"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "After burst: Monday UTC only"
+            if [ "$(date -u +%u)" = "1" ]; then
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "should_run=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Full pipeline
+        if: steps.gate.outputs.should_run == 'true'
+        run: npm run full-run
