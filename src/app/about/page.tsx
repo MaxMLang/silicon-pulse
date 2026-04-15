@@ -80,7 +80,7 @@ export default async function AboutPage() {
           <p>
             A run is one batch: models are drawn from the registry, optional digests are attached, then each
             question is asked under each condition. <strong className="text-zinc-300">Baseline</strong> uses no news
-            text and includes up to <strong className="text-zinc-300">50</strong> models.{' '}
+            text and includes up to <strong className="text-zinc-300">15</strong> models.{' '}
             <strong className="text-zinc-300">Informed</strong> conditions (balanced / left / right digests) use the
             same question text with up to <strong className="text-zinc-300">15</strong> models per slice to keep the
             news-assisted portion bounded. Temperature is 0.
@@ -92,7 +92,7 @@ export default async function AboutPage() {
 
         <Accordion id="models-registry" title="Models & the registry">
           <p>
-            The roster updates over time from the provider API; usable text models are stored in{' '}
+            The roster updates over time from the provider API; usable text-generation models are stored in{' '}
             <code className="text-zinc-300 text-xs">model_registry</code>. Model ids are stable strings so you can
             compare runs even when offerings change.
           </p>

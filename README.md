@@ -15,7 +15,7 @@ I built it to watch how answers cluster, how they move when the information envi
 
 - **Next.js** UI: latest run snapshot, answer overview, per-question breakdowns, longitudinal stacks, pairwise comparison, model registry
 - **Supabase** for surveys, runs, responses, briefs, and optional run digests
-- **OpenRouter** for model calls; registry sync picks from active text-capable models (with caps: baseline surveys up to 50 models, informed/news conditions up to 15 per slice to keep spend predictable)
+- **OpenRouter** for model calls; registry sync picks from active text-generation models (with caps: baseline surveys up to 15 models, informed/news conditions up to 15 per slice to keep spend predictable)
 - **RSS → briefs** script for the three informed feeds
 - **Post-run** theme classification for the open “priorities” item and an optional **digest** article authored by a designated model from aggregate stats
 

@@ -19,7 +19,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 const MIN_CONTEXT_LENGTH = 8192
 /** Keep in sync with BASELINE_MODEL_CAP in scripts/run-survey.ts */
-const TARGET_MODEL_COUNT = 50
+const TARGET_MODEL_COUNT = 15
 
 // Models to always skip (base models, moderation, embedding, image-only)
 const EXCLUDED_FAMILIES = new Set([
@@ -131,10 +131,34 @@ function isBaseModel(modelId: string, name: string): boolean {
   return BASE_MODEL_PATTERNS.some(p => p.test(text))
 }
 
-function isTextModel(model: { architecture?: { modality?: string }; name: string; id: string }): boolean {
-  if (!model.architecture?.modality) return true  // assume text if no modality
-  const modality = model.architecture.modality.toLowerCase()
-  return modality.includes('text')
+/**
+ * Chat / completion LLMs that generate text. Excludes embeddings, rerankers, image/audio generators,
+ * and other non-generation endpoints even when OpenRouter lists them.
+ */
+function isTextGenerationModel(m: any): boolean {
+  const id = (m.id ?? '').toLowerCase()
+  const name = (m.name ?? '').toLowerCase()
+  const haystack = `${id} ${name}`
+
+  if (
+    /\b(embedding|embeddings|rerank|reranker)\b/i.test(haystack) ||
+    /(^|\/|-)embed(der|-|$)/i.test(id) ||
+    /:embed/i.test(id) ||
+    /\b(whisper|text-to-speech|tts\b|speech-to-text|transcribe)\b/i.test(haystack) ||
+    /\b(dall-e|stable-diffusion|midjourney|flux-(pro|dev|schnell)|sdxl|imagen|playground-v2|dreamshaper)/i.test(
+      haystack
+    ) ||
+    /\b(diffusion|inpaint|image-gen|imagegen)\b/i.test(haystack)
+  ) {
+    return false
+  }
+
+  const modality = (m.architecture?.modality ?? '').toLowerCase()
+  if (modality) {
+    if (!modality.includes('text')) return false
+  }
+
+  return true
 }
 
 async function main() {
@@ -159,8 +183,8 @@ async function main() {
 
   // Step 1: Filter eligible models (preserve leaderboard order)
   const eligible = allModels.filter((m: any) => {
-    // Must be a text model
-    if (!isTextModel(m)) return false
+    // Chat / text-generation completions only
+    if (!isTextGenerationModel(m)) return false
     // Skip base (non-instruct) models
     if (isBaseModel(m.id, m.name)) return false
     // Skip free tier (unreliable, rate-limited, not representative)
@@ -177,7 +201,7 @@ async function main() {
     return true
   })
 
-  console.log(`✅ Eligible paid text models: ${eligible.length}`)
+  console.log(`✅ Eligible text-generation models: ${eligible.length}`)
 
   // Step 2: Deduplicate by family - keep highest-ranked (first) per family
   // since the list is already sorted by weekly usage, first = most popular
