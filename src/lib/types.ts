@@ -190,6 +190,8 @@ export interface RunModelParticipation {
   model_name: string
   provider: string
   origin: string | null
+  /** Set when this model is a configured flagship anchor in the registry */
+  anchor_lab: string | null
   responses_ok: number
   responses_failed: number
 }

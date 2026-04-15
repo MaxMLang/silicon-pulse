@@ -198,14 +198,27 @@ export function RunOverviewTabs({
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60">
                   {participation.map(p => (
-                    <tr key={p.model_id} className="hover:bg-zinc-900/30">
+                    <tr
+                      key={p.model_id}
+                      className={`hover:bg-zinc-900/30 ${p.anchor_lab ? 'bg-zinc-900/25' : ''}`}
+                    >
                       <td className="px-3 py-2">
-                        <Link
-                          href={`/models/${encodeURIComponent(p.model_id)}`}
-                          className="text-zinc-200 hover:text-white font-medium"
-                        >
-                          {p.model_name}
-                        </Link>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Link
+                            href={`/models/${encodeURIComponent(p.model_id)}`}
+                            className="text-zinc-200 hover:text-white font-medium"
+                          >
+                            {p.model_name}
+                          </Link>
+                          {p.anchor_lab ? (
+                            <span
+                              title={`Flagship anchor (${p.anchor_lab})`}
+                              className="inline-flex items-center rounded border border-zinc-600/80 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400"
+                            >
+                              Anchor
+                            </span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-3 py-2 text-zinc-500">{p.provider}</td>
                     </tr>

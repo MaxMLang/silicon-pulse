@@ -197,6 +197,7 @@ export async function getRunModelParticipation(runId: string): Promise<RunModelP
       model_name: meta?.display_name ?? v.model_name,
       provider: meta?.provider ?? 'unknown',
       origin: meta?.origin ?? null,
+      anchor_lab: meta?.anchor_lab ?? null,
       responses_ok: v.ok,
       responses_failed: v.failed,
     }
