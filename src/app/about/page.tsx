@@ -54,13 +54,34 @@ export default async function AboutPage() {
           <p>
             Each <strong className="text-zinc-300">run</strong> pulls from the live model registry, attaches optional{' '}
             <strong className="text-zinc-300">news digests</strong> for informed conditions, and records answers for
-            longitudinal views. The accordions below spell out measurement, limits, and how to cite or reuse the work.
+            longitudinal views. The accordions below spell out motivation, how models and briefs are built, measurement,
+            limits, and how to cite or reuse the work.
           </p>
         </div>
       </div>
 
       <div className="space-y-3">
-        <Accordion id="measure" title="What we measure" defaultOpen>
+        <Accordion id="why" title="Why Silicon Pulse" defaultOpen>
+          <p>
+            We want to observe what models produce under a <strong className="text-zinc-300">neutral study protocol</strong>{' '}
+            (research participation, no persona): what they return as their default response to the same items over time.
+            Millions of people use these systems every day as general assistants; tracking how that{' '}
+            <strong className="text-zinc-300">baseline behavior</strong> moves, with and without news context, is a
+            different question from impersonating a human panel or fabricating synthetic survey populations.{' '}
+            <strong className="text-zinc-300">Silicon Pulse is built for that baseline-tracking question</strong>, not for
+            role-play or demographic mimicry.
+          </p>
+          <p>
+            The UI and summaries are there to make completions comparable across runs and diets; nothing here should be
+            read as models having beliefs in a folk-psychology sense. See{' '}
+            <a href="#no-role-prompts" className="text-zinc-200 underline-offset-2 hover:underline">
+              Why we don&apos;t use role-based prompts
+            </a>{' '}
+            for research context on synthetic survey data and limits of human-mimicry designs.
+          </p>
+        </Accordion>
+
+        <Accordion id="measure" title="What we measure">
           <p>
             Think of it as a panel where the panelists are API endpoints. Each run asks the same items: mostly
             closed-form survey-style questions, plus one <strong className="text-zinc-300">open priorities</strong>{' '}
@@ -97,8 +118,27 @@ export default async function AboutPage() {
             compare runs even when offerings change.
           </p>
           <p>
+            <strong className="text-zinc-300">How models are selected.</strong> The panel is drawn from{' '}
+            <strong className="text-zinc-300">OpenRouter</strong>: we take the{' '}
+            <strong className="text-zinc-300">top 15</strong> eligible models on their public leaderboard (models are
+            listed <strong className="text-zinc-300">by weekly usage</strong> on OpenRouter). On each sync we fetch that
+            list, then filter to <strong className="text-zinc-300">text-generation</strong> chat endpoints only: we drop
+            embeddings and rerankers, image or audio generators, non-instruct &quot;base&quot; checkpoints, free-tier
+            endpoints, and models without enough context length or a positive per-token price. We then{' '}
+            <strong className="text-zinc-300">deduplicate by model family</strong> (one representative per lineage, in
+            OpenRouter&apos;s usage order) so we keep fifteen <strong className="text-zinc-300">different families</strong>{' '}
+            rather than fifteen variants of the same stack. Those 15 become the active roster until the next sync. A survey
+            run uses up to 15 models for <strong className="text-zinc-300">baseline</strong> and up to 15 for each{' '}
+            <strong className="text-zinc-300">informed</strong> slice (same pool), so caps stay predictable.
+          </p>
+          <p>
             We record provider, origin where available, and rough capability metadata. Participation in a run is
             whoever returned usable responses under that run - there is no hand-picked panel beyond roster health.
+            Separately, <strong className="text-zinc-300">flagship anchors</strong> (OpenAI, Anthropic, Google, xAI,
+            DeepSeek) are listed in <code className="text-zinc-300 text-xs">src/config/anchor-models.json</code>: they
+            are always merged into each run first (deduped against the leaderboard), then the weekly top-15 usage pool
+            fills remaining slots up to the cap. Update that file when a lab ships a new flagship id; longitudinal charts
+            can show handoffs between segments.
           </p>
           <p className="text-xs text-zinc-500">
             {active.length} active / {models.length} total in registry. The full roster, per-run participation, and
@@ -159,21 +199,32 @@ export default async function AboutPage() {
           <p>
             That line of inquiry - whether and how LLMs can <strong className="text-zinc-300">mimic humans</strong> for
             survey research - is <strong className="text-zinc-300">important</strong>. This project is motivated
-            differently: we want to observe what models produce under a <strong className="text-zinc-300">neutral study protocol</strong>{' '}
-            (research participation, no persona), i.e. what they read as their default response to the same items over
-            time. Millions of people use these systems every day as general assistants; tracking how that{' '}
-            <strong className="text-zinc-300">baseline behavior</strong> moves - with and without news context - is a
-            separate question from impersonating a human panel, and it is the question Silicon Pulse is built for.
+            differently: see <a href="#why" className="text-zinc-200 underline-offset-2 hover:underline">Why Silicon Pulse</a>{' '}
+            for the neutral-protocol framing and what we are trying to measure instead.
           </p>
         </Accordion>
 
         <Accordion id="news-digests" title="News digests & feeds">
           <p>
-            Three RSS-backed digests per run - balanced, left, and right - summarized into a readable block we
-            inject before the same questions used in baseline. The goal is not perfect ideological matching; it is
-            to vary the surrounding news frame and observe whether completions shift. Headlines are stored with
-            outlet names for attribution; summaries may be shortened. Use them in line with fair use and each
-            publisher&apos;s terms.
+            Three RSS-backed digests per run - <strong className="text-zinc-300">balanced</strong>,{' '}
+            <strong className="text-zinc-300">left</strong>, and <strong className="text-zinc-300">right</strong> - are
+            summarized into a readable block we inject before the same questions used in baseline. The goal is not
+            perfect ideological matching; it is to <strong className="text-zinc-300">vary the surrounding news frame</strong>{' '}
+            and observe whether completions shift.
+          </p>
+          <p>
+            <strong className="text-zinc-300">How the brief is curated.</strong> Each slice pulls from a fixed set of{' '}
+            <strong className="text-zinc-300">public RSS feeds</strong> (for example: balanced mixes wires and general
+            outlets such as Reuters, AP, BBC, NPR, CNN, and The Verge; left-leaning includes sources such as The
+            Guardian US and Vox; right-leaning includes sources such as Fox Politics and National Review). We drop items
+            that look like sports, entertainment, or lifestyle when category cues match. Headlines are{' '}
+            <strong className="text-zinc-300">deduplicated</strong>, ranked by recency, then assigned to rough buckets
+            (breaking, politics, tech, world, general) so we can select a <strong className="text-zinc-300">mixed basket</strong>{' '}
+            of stories instead of collapsing on a single topic. A small{' '}
+            <strong className="text-zinc-300">LLM summarizer</strong> turns the chosen headlines into neutral, numbered
+            paragraph briefings; that text is what
+            models see as the news context. Headlines are stored with outlet names for attribution; summaries may be
+            shortened. Use them in line with fair use and each publisher&apos;s terms.
           </p>
           <p className="text-xs text-zinc-500">
             The same digest text we prepend in production is on the{' '}

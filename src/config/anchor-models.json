@@ -1,0 +1,54 @@
+{
+  "anchors": [
+    {
+      "lab": "openai",
+      "displayLabel": "OpenAI",
+      "segments": [
+        {
+          "modelId": "openai/gpt-5.4",
+          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "lab": "anthropic",
+      "displayLabel": "Anthropic",
+      "segments": [
+        {
+          "modelId": "anthropic/claude-opus-4.6",
+          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "lab": "google",
+      "displayLabel": "Google",
+      "segments": [
+        {
+          "modelId": "google/gemini-3.1-pro-preview",
+          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "lab": "xai",
+      "displayLabel": "xAI",
+      "segments": [
+        {
+          "modelId": "x-ai/grok-4.20",
+          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "lab": "deepseek",
+      "displayLabel": "DeepSeek",
+      "segments": [
+        {
+          "modelId": "deepseek/deepseek-chat-v3-0324",
+          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        }
+      ]
+    }
+  ]
+}

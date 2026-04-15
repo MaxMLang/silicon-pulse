@@ -1,4 +1,10 @@
 import type { AnswerOverviewRow } from '@/lib/consensus'
+import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
+
+function topicLabel(row: AnswerOverviewRow): string {
+  if (row.question_id === PRIORITIES_QUESTION_ID) return 'Political priorities'
+  return row.topic
+}
 
 export function AnswersOverview({ rows }: { rows: AnswerOverviewRow[] }) {
   return (
@@ -8,7 +14,8 @@ export function AnswersOverview({ rows }: { rows: AnswerOverviewRow[] }) {
           Answer overview (baseline, no news brief)
         </h2>
         <p className="text-xs text-zinc-600 mt-1">
-          Plurality answer or top classified theme per item; % is share among models with a valid response.
+          Plurality answer or top classified theme per item; the political-priority row shows the top theme across
+          models; % is share among models with a valid response.
         </p>
       </div>
       <div className="overflow-x-auto">
@@ -26,7 +33,7 @@ export function AnswersOverview({ rows }: { rows: AnswerOverviewRow[] }) {
             {rows.map(row => (
               <tr key={row.question_id} className="hover:bg-zinc-900/30 align-top">
                 <td className="px-3 py-2 font-mono text-zinc-200/95 whitespace-nowrap">{row.question_id}</td>
-                <td className="px-3 py-2 text-zinc-500 max-w-[120px]">{row.topic}</td>
+                <td className="px-3 py-2 text-zinc-500 max-w-[120px]">{topicLabel(row)}</td>
                 <td className="px-3 py-2 text-zinc-200 leading-snug">{row.label}</td>
                 <td className="px-3 py-2 text-right font-mono text-zinc-400">
                   {row.pct !== null ? `${row.pct}%` : '-'}

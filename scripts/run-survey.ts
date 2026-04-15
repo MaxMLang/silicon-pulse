@@ -1,7 +1,15 @@
 #!/usr/bin/env npx ts-node
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
+import type { AnchorModelsFile } from '../src/lib/anchor-models.types'
+import { currentModelIdForLab } from '../src/lib/anchor-models'
 dotenv.config({ path: '.env.local' })
+
+function loadAnchorConfig(): AnchorModelsFile {
+  return JSON.parse(readFileSync(join(process.cwd(), 'src/config/anchor-models.json'), 'utf-8'))
+}
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -45,6 +53,73 @@ interface Survey {
 interface Model {
   id: string
   display_name: string
+}
+
+type RegistryRow = {
+  id: string
+  display_name: string
+  anchor_lab: string | null
+  usage_rank: number | null
+}
+
+/**
+ * Anchors first (per `anchor-models.json`), then fill from weekly usage leaderboard without duplicate ids.
+ * Total length is capped at `baselineCap`.
+ */
+function buildMergedModelList(
+  rows: RegistryRow[],
+  config: AnchorModelsFile,
+  baselineCap: number
+): Model[] {
+  const byId = new Map(rows.map(r => [r.id, r]))
+  const merged: Model[] = []
+  const seen = new Set<string>()
+
+  for (const def of config.anchors) {
+    const id = currentModelIdForLab(def)
+    const row = byId.get(id)
+    if (!row) {
+      console.error(
+        `❌ Anchor ${def.lab} → ${id} not in model_registry. Run npm run update-models after editing anchor-models.json.`
+      )
+      continue
+    }
+    if (!seen.has(id)) {
+      merged.push({ id: row.id, display_name: row.display_name })
+      seen.add(id)
+    }
+  }
+
+  const usagePool = rows
+    .filter(r => r.usage_rank != null)
+    .sort((a, b) => (a.usage_rank ?? 999) - (b.usage_rank ?? 999))
+
+  const usageOrdered: RegistryRow[] =
+    usagePool.length > 0
+      ? usagePool
+      : (() => {
+          console.warn(
+            '⚠️ No usage_rank in registry — using alphabetical non-anchor fallback. Run npm run update-models.'
+          )
+          return rows
+            .filter(r => r.anchor_lab == null)
+            .sort((a, b) => a.display_name.localeCompare(b.display_name))
+        })()
+
+  for (const u of usageOrdered) {
+    if (merged.length >= baselineCap) break
+    if (!seen.has(u.id)) {
+      merged.push({ id: u.id, display_name: u.display_name })
+      seen.add(u.id)
+    }
+  }
+
+  const nAnch = config.anchors.filter(d => byId.has(currentModelIdForLab(d))).length
+  console.log(
+    `Model merge: ${merged.length} models (cap ${baselineCap}) — ${nAnch} anchor labs resolved, ` +
+      `${usageOrdered.length} usage-pool rows, ${seen.size} unique ids`
+  )
+  return merged
 }
 
 interface NewsBrief {
@@ -347,15 +422,16 @@ async function main() {
     auth: { persistSession: false },
   })
 
-  const { data: models, error: modelsError } = await supabase
+  const { data: regRows, error: modelsError } = await supabase
     .from('model_registry')
-    .select('id, display_name')
+    .select('id, display_name, anchor_lab, usage_rank')
     .eq('active', true)
   if (modelsError) throw modelsError
-  if (!models?.length) throw new Error('No active models in registry.')
+  if (!regRows?.length) throw new Error('No active models in registry.')
 
-  const sorted = [...models].sort((a, b) => a.display_name.localeCompare(b.display_name))
-  const pool = MODEL_LIMIT != null ? sorted.slice(0, MODEL_LIMIT) : sorted
+  const anchorConfig = loadAnchorConfig()
+  const merged = buildMergedModelList(regRows as RegistryRow[], anchorConfig, BASELINE_MODEL_CAP)
+  const pool = MODEL_LIMIT != null ? merged.slice(0, MODEL_LIMIT) : merged
 
   const baselineModels = pool.slice(0, Math.min(BASELINE_MODEL_CAP, pool.length))
   const informedModels = pool.slice(0, Math.min(INFORMED_MODEL_CAP, pool.length))

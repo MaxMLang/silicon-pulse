@@ -58,6 +58,10 @@ export interface ModelRegistry {
   context_length: number | null
   pricing_prompt: number | null
   pricing_completion: number | null
+  /** Lab key when this row is a flagship anchor (see `src/config/anchor-models.json`). */
+  anchor_lab?: string | null
+  /** 1–15 from weekly usage leaderboard; null for anchor-only rows. */
+  usage_rank?: number | null
 }
 
 export interface NewsBrief {

@@ -1,6 +1,5 @@
 import type { Survey, Response, FeedType } from './types'
 import { conditionForFeed } from './feed'
-import { PRIORITIES_QUESTION_ID } from './priorities-constants'
 
 /** One row per question: plurality answer or top theme under baseline (no-news). */
 export interface AnswerOverviewRow {
@@ -20,8 +19,6 @@ export function buildBaselineAnswersOverview(
   const rows: AnswerOverviewRow[] = []
 
   for (const survey of surveys) {
-    if (survey.question_id === PRIORITIES_QUESTION_ID) continue
-
     const rs = responses.filter(
       r =>
         r.survey_id === survey.id &&

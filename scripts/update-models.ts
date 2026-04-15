@@ -4,14 +4,24 @@
  *
  * Hits OpenRouter's /api/v1/models endpoint, filters to the top eligible models
  * (see TARGET_MODEL_COUNT, aligned with BASELINE_MODEL_CAP in run-survey.ts), and
- * upserts them into the model_registry table.
+ * upserts them into the model_registry table. Then upserts flagship anchors from
+ * `src/config/anchor-models.json` so they stay active even when outside the top 15.
  *
  * Run: npx ts-node scripts/update-models.ts
  */
 
+import { readFileSync } from 'fs'
+import { join } from 'path'
 import { createClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
+import type { AnchorModelsFile } from '../src/lib/anchor-models.types'
+import { currentModelIdForLab } from '../src/lib/anchor-models'
 dotenv.config({ path: '.env.local' })
+
+function loadAnchorConfig(): AnchorModelsFile {
+  const p = join(process.cwd(), 'src/config/anchor-models.json')
+  return JSON.parse(readFileSync(p, 'utf-8')) as AnchorModelsFile
+}
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
@@ -233,7 +243,7 @@ async function main() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  const upsertRows = selected.map((m: any) => {
+  function rowFromApi(m: any, extra: { anchor_lab: string | null; usage_rank: number | null }) {
     const provider = inferProvider(m.id)
     return {
       id: m.id,
@@ -247,8 +257,14 @@ async function main() {
       context_length: m.context_length ?? null,
       pricing_prompt: parseFloat(m.pricing?.prompt ?? '0') || null,
       pricing_completion: parseFloat(m.pricing?.completion ?? '0') || null,
+      anchor_lab: extra.anchor_lab,
+      usage_rank: extra.usage_rank,
     }
-  })
+  }
+
+  const upsertRows = selected.map((m: any, i: number) =>
+    rowFromApi(m, { anchor_lab: null, usage_rank: i + 1 })
+  )
 
   const { error } = await supabase.from('model_registry').upsert(upsertRows, {
     onConflict: 'id',
@@ -260,16 +276,56 @@ async function main() {
     process.exit(1)
   }
 
+  // Flagship anchors (merge leaderboard rank when the same model appears in both)
+  const anchorConfig = loadAnchorConfig()
+  const anchorRows: ReturnType<typeof rowFromApi>[] = []
+  for (const def of anchorConfig.anchors) {
+    const mid = currentModelIdForLab(def)
+    const apiModel = allModels.find((x: any) => x.id === mid)
+    const lbIdx = selected.findIndex((x: any) => x.id === mid)
+    const usage_rank = lbIdx >= 0 ? lbIdx + 1 : null
+    if (!apiModel) {
+      console.warn(`⚠️ Anchor not found on OpenRouter: ${mid} (${def.displayLabel}) — fix anchor-models.json`)
+      continue
+    }
+    if (!isTextGenerationModel(apiModel) || isBaseModel(apiModel.id, apiModel.name ?? '')) {
+      console.warn(`⚠️ Anchor failed eligibility checks: ${mid} (${def.displayLabel})`)
+      continue
+    }
+    const price = parseFloat(apiModel.pricing?.prompt ?? '0')
+    if (price <= 0 || (apiModel.context_length ?? 0) < MIN_CONTEXT_LENGTH) {
+      console.warn(`⚠️ Anchor skipped (price/context): ${mid}`)
+      continue
+    }
+    anchorRows.push(rowFromApi(apiModel, { anchor_lab: def.lab, usage_rank }))
+  }
+
+  if (anchorRows.length > 0) {
+    const { error: anchorErr } = await supabase.from('model_registry').upsert(anchorRows, {
+      onConflict: 'id',
+      ignoreDuplicates: false,
+    })
+    if (anchorErr) {
+      console.error('❌ Supabase anchor upsert error:', anchorErr)
+      process.exit(1)
+    }
+    console.log(
+      `\n⚓ Anchors refreshed: ${anchorRows.map(r => `${r.anchor_lab}=${r.id}`).join(', ')}`
+    )
+  }
+
   // Set first_seen only for new models (use a separate update that won't override existing)
   const { data: existingIds } = await supabase.from('model_registry').select('id, first_seen')
   const existingMap = new Map((existingIds ?? []).map((r: any) => [r.id, r.first_seen]))
 
-  const newModelIds = upsertRows.filter(r => !existingMap.has(r.id) || existingMap.get(r.id) === today).map(r => r.id)
-  if (newModelIds.length > 0) {
-    console.log(`\n🆕 New models added: ${newModelIds.join(', ')}`)
+  const beforeIds = new Set((existingIds ?? []).map((r: any) => r.id))
+  const allUpsertedIds = [...upsertRows, ...anchorRows].map(r => r.id)
+  const newOnes = [...new Set(allUpsertedIds.filter(id => !beforeIds.has(id)))]
+  if (newOnes.length > 0) {
+    console.log(`\n🆕 New models added: ${newOnes.join(', ')}`)
   }
 
-  console.log(`\n✅ model_registry updated with ${selected.length} active models.`)
+  console.log(`\n✅ model_registry: ${selected.length} usage leaderboard + ${anchorRows.length} anchor rows (overlaps merged by id).`)
 }
 
 main().catch(err => {
