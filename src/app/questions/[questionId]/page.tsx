@@ -13,6 +13,7 @@ import { countsToPercents } from '@/lib/parse'
 import { conditionForFeed } from '@/lib/feed'
 import type { Survey, Response, FeedType } from '@/lib/types'
 import { PRIORITY_THEMES } from '@/lib/types'
+import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 
 const FEED_TYPES: FeedType[] = ['none', 'balanced', 'left', 'right']
@@ -102,7 +103,7 @@ export default function QuestionDetailPage() {
   const themeCounts: Record<string, number> = {}
   if (isOpen) {
     for (const r of filteredResponses) {
-      const c = r.mip_category ?? 'Other'
+      const c = normalizePriorityThemeLabel(r.mip_category)
       themeCounts[c] = (themeCounts[c] ?? 0) + 1
     }
   }
@@ -116,7 +117,7 @@ export default function QuestionDetailPage() {
     id,
     name: data.name,
     answers: data.answers,
-    theme: data.theme,
+    theme: normalizePriorityThemeLabel(data.theme),
     topAnswer: data.answers[0] ?? null,
   }))
 

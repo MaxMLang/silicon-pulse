@@ -293,9 +293,15 @@ async function main() {
       continue
     }
     const price = parseFloat(apiModel.pricing?.prompt ?? '0')
-    if (price <= 0 || (apiModel.context_length ?? 0) < MIN_CONTEXT_LENGTH) {
-      console.warn(`⚠️ Anchor skipped (price/context): ${mid}`)
+    const ctx = apiModel.context_length ?? 0
+    if (ctx < MIN_CONTEXT_LENGTH) {
+      console.warn(`⚠️ Anchor skipped (context < ${MIN_CONTEXT_LENGTH}): ${mid}`)
       continue
+    }
+    if (price <= 0) {
+      console.warn(
+        `⚠️ Anchor ${mid} has $0 prompt rate — upserting anyway so the flagship stays in the registry`
+      )
     }
     anchorRows.push(rowFromApi(apiModel, { anchor_lab: def.lab, usage_rank }))
   }

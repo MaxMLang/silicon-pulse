@@ -5,6 +5,7 @@ import { format } from 'date-fns'
 import { supabase } from '@/lib/supabase'
 import type { Survey, ModelRegistry, FeedType, Response, Run } from '@/lib/types'
 import { conditionForFeed } from '@/lib/feed'
+import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 
 const FEED_TYPES: FeedType[] = ['none', 'balanced', 'left', 'right']
 const FEED_LABELS: Record<FeedType, string> = {
@@ -20,7 +21,7 @@ function agreementKey(survey: Survey, r: Response): string | null {
     const a = r.answer?.trim()
     return a ?? null
   }
-  if (r.mip_category?.trim()) return `cat:${r.mip_category.trim()}`
+  if (r.mip_category?.trim()) return `cat:${normalizePriorityThemeLabel(r.mip_category)}`
   const raw = r.answer?.trim().toLowerCase()
   return raw ? `raw:${raw}` : null
 }

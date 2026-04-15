@@ -54,8 +54,8 @@ export default async function AboutPage() {
           <p>
             Each <strong className="text-zinc-300">run</strong> pulls from the live model registry, attaches optional{' '}
             <strong className="text-zinc-300">news digests</strong> for informed conditions, and records answers for
-            longitudinal views. The accordions below spell out motivation, how models and briefs are built, measurement,
-            limits, and how to cite or reuse the work.
+            longitudinal views. The accordions below spell out motivation, how models, flagship anchors, and briefs are
+            built, measurement, limits, and how to cite or reuse the work.
           </p>
         </div>
       </div>
@@ -133,12 +133,12 @@ export default async function AboutPage() {
           </p>
           <p>
             We record provider, origin where available, and rough capability metadata. Participation in a run is
-            whoever returned usable responses under that run - there is no hand-picked panel beyond roster health.
-            Separately, <strong className="text-zinc-300">flagship anchors</strong> (OpenAI, Anthropic, Google, xAI,
-            DeepSeek) are listed in <code className="text-zinc-300 text-xs">src/config/anchor-models.json</code>: they
-            are always merged into each run first (deduped against the leaderboard), then the weekly top-15 usage pool
-            fills remaining slots up to the cap. Update that file when a lab ships a new flagship id; longitudinal charts
-            can show handoffs between segments.
+            whoever returned usable responses under that run - there is no hand-picked panel beyond roster health. For{' '}
+            <strong className="text-zinc-300">flagship anchors</strong> (one curated representative per major lab), see{' '}
+            <a href="#anchor-models" className="text-zinc-200 underline-offset-2 hover:underline">
+              Flagship anchors
+            </a>
+            .
           </p>
           <p className="text-xs text-zinc-500">
             {active.length} active / {models.length} total in registry. The full roster, per-run participation, and
@@ -156,6 +156,30 @@ export default async function AboutPage() {
               <span className="text-[11px] text-zinc-600">+{active.length - 28} more…</span>
             )}
           </div>
+        </Accordion>
+
+        <Accordion id="anchor-models" title="Flagship anchors">
+          <p>
+            The weekly OpenRouter pool tracks what is popular, but <strong className="text-zinc-300">longitudinal</strong>{' '}
+            comparison is clearer if major labs are always represented by an explicit{' '}
+            <strong className="text-zinc-300">flagship</strong>: one current endpoint per lab (for example OpenAI,
+            Anthropic, Google, xAI, DeepSeek) chosen for comparability across runs, not for demographics.
+          </p>
+          <p>
+            Each survey run <strong className="text-zinc-300">always includes</strong> those flagships first (they are
+            deduplicated against the leaderboard so the same id is not counted twice), then the{' '}
+            <strong className="text-zinc-300">top-15-by-usage</strong> family pool fills the remaining slots up to the
+            cap. That way the panel mixes “what people are using this week” with “what each big lab is shipping as its
+            headline model.”
+          </p>
+          <p>
+            When a lab releases a new default model, maintainers record a <strong className="text-zinc-300">cutover</strong>{' '}
+            with an effective date. On the <strong className="text-zinc-300">Longitudinal</strong> page,{' '}
+            <strong className="text-zinc-300">vertical dividers</strong> in flagship mode mark those{' '}
+            <strong className="text-zinc-300">handoffs</strong>, so a shift in the series reflects a change of endpoint,
+            not an unexplained jump. Exact model ids and effective dates are published with the open-source project for
+            transparency and reproducibility.
+          </p>
         </Accordion>
 
         <Accordion id="prompts" title="Prompts & theme labels">

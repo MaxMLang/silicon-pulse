@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { format, parseISO } from 'date-fns'
 import * as dotenv from 'dotenv'
+import { normalizePriorityThemeLabel } from '../src/lib/priority-theme-display'
 dotenv.config({ path: '.env.local' })
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
@@ -87,7 +88,7 @@ async function collectFacts(
     const rows = baseline.filter(r => r.survey_id === s.id)
     if (s.source === 'open' || !s.options?.length) {
       for (const r of rows) {
-        const t = r.mip_category ?? 'Other'
+        const t = normalizePriorityThemeLabel(r.mip_category)
         openThemes[t] = (openThemes[t] ?? 0) + 1
       }
       continue

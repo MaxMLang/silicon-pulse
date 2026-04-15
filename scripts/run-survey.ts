@@ -63,8 +63,9 @@ type RegistryRow = {
 }
 
 /**
- * Anchors first (per `anchor-models.json`), then fill from weekly usage leaderboard without duplicate ids.
- * Total length is capped at `baselineCap`.
+ * All configured anchors first (must exist in registry), then fill remaining slots up to `baselineCap`
+ * from the usage-ranked pool. If anchors alone exceed `baselineCap`, every anchor is still kept (run may
+ * use more than `baselineCap` models so flagships are never dropped).
  */
 function buildMergedModelList(
   rows: RegistryRow[],
@@ -72,7 +73,7 @@ function buildMergedModelList(
   baselineCap: number
 ): Model[] {
   const byId = new Map(rows.map(r => [r.id, r]))
-  const merged: Model[] = []
+  const anchorModels: Model[] = []
   const seen = new Set<string>()
 
   for (const def of config.anchors) {
@@ -85,7 +86,7 @@ function buildMergedModelList(
       continue
     }
     if (!seen.has(id)) {
-      merged.push({ id: row.id, display_name: row.display_name })
+      anchorModels.push({ id: row.id, display_name: row.display_name })
       seen.add(id)
     }
   }
@@ -106,18 +107,22 @@ function buildMergedModelList(
             .sort((a, b) => a.display_name.localeCompare(b.display_name))
         })()
 
+  const usageSlots = Math.max(0, baselineCap - anchorModels.length)
+  const usagePicks: Model[] = []
   for (const u of usageOrdered) {
-    if (merged.length >= baselineCap) break
+    if (usagePicks.length >= usageSlots) break
     if (!seen.has(u.id)) {
-      merged.push({ id: u.id, display_name: u.display_name })
+      usagePicks.push({ id: u.id, display_name: u.display_name })
       seen.add(u.id)
     }
   }
 
+  const merged = [...anchorModels, ...usagePicks]
+
   const nAnch = config.anchors.filter(d => byId.has(currentModelIdForLab(d))).length
   console.log(
-    `Model merge: ${merged.length} models (cap ${baselineCap}) — ${nAnch} anchor labs resolved, ` +
-      `${usageOrdered.length} usage-pool rows, ${seen.size} unique ids`
+    `Model merge: ${merged.length} models (anchors ${anchorModels.length}, usage fill ${usagePicks.length}, target cap ${baselineCap}) — ` +
+      `${nAnch} anchor labs in registry, ${usageOrdered.length} usage-pool rows`
   )
   return merged
 }
@@ -433,7 +438,8 @@ async function main() {
   const merged = buildMergedModelList(regRows as RegistryRow[], anchorConfig, BASELINE_MODEL_CAP)
   const pool = MODEL_LIMIT != null ? merged.slice(0, MODEL_LIMIT) : merged
 
-  const baselineModels = pool.slice(0, Math.min(BASELINE_MODEL_CAP, pool.length))
+  // Pool length is already "all anchors + usage fill" from buildMergedModelList; do not truncate again.
+  const baselineModels = pool
   const informedModels = pool.slice(0, Math.min(INFORMED_MODEL_CAP, pool.length))
 
   console.log(

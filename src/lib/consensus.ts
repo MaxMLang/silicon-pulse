@@ -1,5 +1,6 @@
 import type { Survey, Response, FeedType } from './types'
 import { conditionForFeed } from './feed'
+import { normalizePriorityThemeLabel } from './priority-theme-display'
 
 /** One row per question: plurality answer or top theme under baseline (no-news). */
 export interface AnswerOverviewRow {
@@ -73,7 +74,7 @@ export function buildBaselineAnswersOverview(
 
     const counts: Record<string, number> = {}
     for (const r of rs) {
-      const k = r.mip_category?.trim() || '(pending classification)'
+      const k = normalizePriorityThemeLabel(r.mip_category)
       counts[k] = (counts[k] ?? 0) + 1
     }
     const [label, c] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]
@@ -95,7 +96,9 @@ function agreementKey(survey: Survey, r: Response): string | null {
     const a = r.answer?.trim()
     return a ?? null
   }
-  if (r.mip_category?.trim()) return `cat:${r.mip_category.trim()}`
+  if (r.mip_category?.trim()) {
+    return `cat:${normalizePriorityThemeLabel(r.mip_category)}`
+  }
   const raw = r.answer?.trim().toLowerCase()
   return raw ? `raw:${raw}` : null
 }

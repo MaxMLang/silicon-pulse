@@ -162,6 +162,8 @@ export async function getRunResponseTotals(runId: string): Promise<{
 }
 
 export async function getRunModelParticipation(runId: string): Promise<RunModelParticipation[]> {
+  const { data: runRow } = await supabase.from('runs').select('model_list').eq('id', runId).single()
+
   const { data: responses, error } = await supabase
     .from('responses')
     .select('model_id, model_name, error')
@@ -176,6 +178,13 @@ export async function getRunModelParticipation(runId: string): Promise<RunModelP
     const row = tally.get(r.model_id)!
     if (r.error != null && String(r.error).length > 0) row.failed++
     else row.ok++
+  }
+
+  const planned: string[] = Array.isArray(runRow?.model_list) ? runRow.model_list : []
+  for (const id of planned) {
+    if (!tally.has(id)) {
+      tally.set(id, { model_name: id, ok: 0, failed: 0 })
+    }
   }
 
   const { data: models } = await supabase.from('model_registry').select('*')

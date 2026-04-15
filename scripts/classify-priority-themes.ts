@@ -11,6 +11,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
+import { PRIORITY_THEMES } from '../src/lib/types'
 dotenv.config({ path: '.env.local' })
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
@@ -21,29 +22,24 @@ const CLASSIFIER_MODEL = 'anthropic/claude-haiku-4-5'
 const BATCH_SIZE = 20
 const BATCH_DELAY_MS = 500
 
-const PRIORITY_THEMES = [
-  'Economy',
-  'Government/Leadership',
-  'Immigration',
-  'Healthcare',
-  'Crime/Violence',
-  'Education',
-  'Environment/Climate',
-  'National Security',
-  'Race Relations',
-  'Poverty/Inequality',
-  'Other',
-]
+const DECLINED = 'Declined to answer or unclear' as const
 
 const args = process.argv.slice(2)
 const RUN_ID_IDX = args.indexOf('--run-id')
 const TARGET_RUN_ID = RUN_ID_IDX >= 0 ? args[RUN_ID_IDX + 1] : null
 
 async function classifyResponse(answer: string): Promise<string> {
+  const t = answer.trim()
+  if (!t || t === '-' || t === '—') {
+    return DECLINED
+  }
+
   const prompt = `You are a research assistant classifying open-ended survey responses about the most important problem facing the United States.
 
 Classify the following response into exactly ONE of these categories:
 ${PRIORITY_THEMES.map(c => `- ${c}`).join('\n')}
+
+Use "${DECLINED}" for refusals, empty or nonsensical replies, a lone dash, or when the answer does not support any policy theme above.
 
 Response to classify: "${answer}"
 
@@ -68,10 +64,11 @@ Reply with ONLY the category name, nothing else.`
   if (!res.ok) throw new Error(`Classifier HTTP ${res.status}`)
 
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] }
-  const raw = (data.choices?.[0]?.message?.content ?? 'Other').trim()
+  const raw = (data.choices?.[0]?.message?.content ?? DECLINED).trim()
 
-  const matched = PRIORITY_THEMES.find(c => raw.toLowerCase().includes(c.toLowerCase()))
-  return matched ?? 'Other'
+  const sorted = [...PRIORITY_THEMES].sort((a, b) => b.length - a.length)
+  const matched = sorted.find(c => raw.toLowerCase().includes(c.toLowerCase()))
+  return matched ?? DECLINED
 }
 
 async function main() {
@@ -128,7 +125,7 @@ async function main() {
           return { id: r.id, category, success: true }
         } catch (err) {
           console.warn(`  ⚠️  Failed to classify response ${r.id}: ${(err as Error).message}`)
-          return { id: r.id, category: 'Other', success: false }
+          return { id: r.id, category: DECLINED, success: false }
         }
       })
     )
@@ -149,7 +146,7 @@ async function main() {
 
   console.log(`\n✅ Classification complete`)
   console.log(`   Classified: ${classified}`)
-  console.log(`   Failed (defaulted to Other): ${failed}`)
+  console.log(`   Failed (defaulted to ${DECLINED}): ${failed}`)
 }
 
 main().catch(err => {

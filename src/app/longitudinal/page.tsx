@@ -6,6 +6,7 @@ import {
   Legend, CartesianGrid, ReferenceLine,
 } from 'recharts'
 import { format } from 'date-fns'
+import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { countsToPercents } from '@/lib/parse'
 import { conditionForFeed } from '@/lib/feed'
@@ -14,6 +15,7 @@ import { EmptyState } from '@/components/empty-state'
 import { ChartShell } from '@/components/chart-shell'
 import type { Survey, FeedType } from '@/lib/types'
 import { PRIORITY_THEMES } from '@/lib/types'
+import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 import {
   getAnchorConfig,
@@ -48,7 +50,7 @@ interface RunPoint {
   feedType: FeedType
   answerDist: Record<string, number>
   modelCount: number
-  /** Set when view is per-lab flagship (see anchor-models.json). */
+  /** Set when view is per-lab flagship (see About: Flagship anchors). */
   anchorLab?: string
 }
 
@@ -128,11 +130,7 @@ export default function LongitudinalPage() {
           const counts: Record<string, number> = {}
           if (openItem) {
             for (const row of rows) {
-              const mip = row.mip
-              const key =
-                mip && (PRIORITY_THEMES as readonly string[]).includes(mip)
-                  ? mip
-                  : 'Other'
+              const key = normalizePriorityThemeLabel(row.mip)
               counts[key] = (counts[key] ?? 0) + 1
             }
           } else {
@@ -318,9 +316,19 @@ export default function LongitudinalPage() {
               Flagship anchors
             </button>
           </div>
-          <p className="text-[11px] text-zinc-600 mt-2 max-w-xs">
-            Anchors follow <code className="text-zinc-500">src/config/anchor-models.json</code>. Vertical
-            dashes mark configured model handoffs.
+          <p className="text-[11px] text-zinc-600 mt-2 max-w-md leading-relaxed">
+            <span className="text-zinc-500">
+              One flagship model per major lab, chosen so time series stay comparable across runs.{' '}
+              <strong className="text-zinc-400 font-medium">Vertical dividers</strong> mark{' '}
+              <strong className="text-zinc-400 font-medium">handoffs</strong> when that lab&apos;s representative
+              endpoint changed.{' '}
+            </span>
+            <Link
+              href="/about#anchor-models"
+              className="text-zinc-400 underline-offset-2 hover:underline hover:text-zinc-300"
+            >
+              How flagship anchors work
+            </Link>
           </p>
         </div>
       </div>

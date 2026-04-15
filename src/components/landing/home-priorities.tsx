@@ -19,6 +19,7 @@ import { conditionForFeed } from '@/lib/feed'
 import { ALL_FEED_TYPES, labelForNewsDiet } from '@/components/landing/news-diet-options'
 import type { FeedType } from '@/lib/types'
 import { PRIORITY_THEMES } from '@/lib/types'
+import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -33,6 +34,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Race Relations': '#ec4899',
   'Poverty/Inequality': '#a78bfa',
   Other: '#71717a',
+  'Declined to answer or unclear': '#52525b',
 }
 
 interface ThemeDistribution {
@@ -68,7 +70,7 @@ function buildDistributions(responses: Row[]): Map<FeedType, ThemeDistribution[]
 
     const counts: Record<string, number> = {}
     for (const r of feedResponses) {
-      const cat = r.mip_category ?? 'Other'
+      const cat = normalizePriorityThemeLabel(r.mip_category)
       counts[cat] = (counts[cat] ?? 0) + 1
     }
 
@@ -138,7 +140,7 @@ export function HomePriorities({ runId, feed }: { runId: string; feed: FeedType 
         byModel.set(r.model_id, {
           modelId: r.model_id,
           modelName: r.model_name,
-          category: r.mip_category,
+          category: normalizePriorityThemeLabel(r.mip_category),
           raw: r.answer,
         })
       }
@@ -275,19 +277,23 @@ export function HomePriorities({ runId, feed }: { runId: string; feed: FeedType 
                         <tr key={row.modelId} className="hover:bg-zinc-900/30 align-top">
                           <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{row.modelName}</td>
                           <td className="px-3 py-2">
-                            {row.category ? (
-                              <span className="inline-flex items-center gap-1.5">
-                                <span
-                                  className="w-2 h-2 rounded-full shrink-0"
-                                  style={{
-                                    backgroundColor: CATEGORY_COLORS[row.category] ?? '#71717a',
-                                  }}
-                                />
-                                <span className="text-emerald-400/95">{row.category}</span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{
+                                  backgroundColor: CATEGORY_COLORS[row.category ?? ''] ?? '#71717a',
+                                }}
+                              />
+                              <span
+                                className={
+                                  row.category === 'Declined to answer or unclear'
+                                    ? 'text-zinc-500'
+                                    : 'text-emerald-400/95'
+                                }
+                              >
+                                {row.category}
                               </span>
-                            ) : (
-                              <span className="text-zinc-600">-</span>
-                            )}
+                            </span>
                           </td>
                           <td className="px-3 py-2 text-zinc-400 leading-relaxed">{row.raw ?? '-'}</td>
                         </tr>

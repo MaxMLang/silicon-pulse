@@ -63,6 +63,9 @@ Classify the following response into exactly ONE of these categories:
 - Race Relations
 - Poverty/Inequality
 - Other
+- Declined to answer or unclear
+
+Use "Declined to answer or unclear" for refusals, empty or nonsensical replies, a lone dash, or when the answer does not support any policy theme above.
 
 Response to classify: "${rawResponse}"
 

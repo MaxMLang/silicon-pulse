@@ -15,6 +15,7 @@ import { conditionForFeed } from '@/lib/feed'
 import { countsToPercents } from '@/lib/parse'
 import type { Survey, Response, FeedType } from '@/lib/types'
 import { PRIORITY_THEMES } from '@/lib/types'
+import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 
 function isOpenSurvey(s: Survey): boolean {
@@ -67,20 +68,16 @@ function QuestionCard({
 
   const chartData = useMemo(() => {
     if (open) {
-      const hasCat = rows.some(r => r.mip_category)
-      if (hasCat) {
-        const counts: Record<string, number> = {}
-        for (const r of rows) {
-          const c = r.mip_category ?? 'Other'
-          counts[c] = (counts[c] ?? 0) + 1
-        }
-        const total = rows.length || 1
-        return PRIORITY_THEMES.filter(cat => (counts[cat] ?? 0) > 0).map(cat => ({
-          name: cat.replace('/', '/\u200b'),
-          pct: Math.round(((counts[cat] ?? 0) / total) * 100),
-        }))
+      const counts: Record<string, number> = {}
+      for (const r of rows) {
+        const c = normalizePriorityThemeLabel(r.mip_category)
+        counts[c] = (counts[c] ?? 0) + 1
       }
-      return []
+      const total = rows.length || 1
+      return PRIORITY_THEMES.filter(cat => (counts[cat] ?? 0) > 0).map(cat => ({
+        name: cat.replace('/', '/\u200b'),
+        pct: Math.round(((counts[cat] ?? 0) / total) * 100),
+      }))
     }
     const counts: Record<string, number> = {}
     for (const r of rows) {
@@ -106,7 +103,7 @@ function QuestionCard({
           name: r.model_name,
           answer: r.answer,
           reasoning: r.reasoning,
-          theme: r.mip_category,
+          theme: normalizePriorityThemeLabel(r.mip_category),
         })
       }
     }
@@ -129,11 +126,8 @@ function QuestionCard({
       <div className="p-4">
         {rows.length === 0 ? (
           <p className="text-xs text-zinc-600">No answers for this feed in the latest run.</p>
-        ) : open && chartData.length === 0 ? (
-          <p className="text-xs text-zinc-500 mb-3">
-            Free-text answers are collected; theme charts appear once answers are classified. See Priorities above for
-            the word cloud.
-          </p>
+        ) : chartData.length === 0 ? (
+          <p className="text-xs text-zinc-500 mb-3">No chart data for this feed.</p>
         ) : chartData.length > 0 ? (
           <ChartShell h={200} className="mb-4 w-full">
             <ResponsiveContainer width="100%" height="100%">
@@ -196,11 +190,17 @@ function QuestionCard({
                     <td className="px-3 py-2 text-zinc-200 max-w-[220px]">
                       {open ? (
                         <span className="line-clamp-4">
-                          {row.theme && (
-                            <span className="text-emerald-400/90 block text-[11px] mb-0.5">{row.theme}</span>
-                          )}
+                          <span
+                            className={`block text-[11px] mb-0.5 ${
+                              row.theme === 'Declined to answer or unclear'
+                                ? 'text-zinc-500'
+                                : 'text-emerald-400/90'
+                            }`}
+                          >
+                            {row.theme}
+                          </span>
                           {row.answer && <span className="text-zinc-300">{row.answer}</span>}
-                          {!row.theme && !row.answer && '-'}
+                          {!row.answer && '-'}
                         </span>
                       ) : (
                         <span>{row.answer ?? '-'}</span>
