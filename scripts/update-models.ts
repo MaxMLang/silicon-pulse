@@ -2,8 +2,9 @@
 /**
  * update-models.ts
  *
- * Hits OpenRouter's /api/v1/models endpoint, filters to the top 30 eligible
- * models, and upserts them into the model_registry table.
+ * Hits OpenRouter's /api/v1/models endpoint, filters to the top eligible models
+ * (see TARGET_MODEL_COUNT, aligned with BASELINE_MODEL_CAP in run-survey.ts), and
+ * upserts them into the model_registry table.
  *
  * Run: npx ts-node scripts/update-models.ts
  */
@@ -17,7 +18,8 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 
 const MIN_CONTEXT_LENGTH = 8192
-const TARGET_MODEL_COUNT = 15
+/** Keep in sync with BASELINE_MODEL_CAP in scripts/run-survey.ts */
+const TARGET_MODEL_COUNT = 50
 
 // Models to always skip (base models, moderation, embedding, image-only)
 const EXCLUDED_FAMILIES = new Set([
@@ -191,9 +193,9 @@ async function main() {
   console.log(`🎯 After deduplication by family: ${deduplicated.length}`)
 
   // Leaderboard order is already preserved - no re-sort needed
-  const top30 = deduplicated.slice(0, TARGET_MODEL_COUNT)
-  console.log(`\n🏆 Top ${top30.length} models by weekly usage:`)
-  top30.forEach((m: any, i: number) => {
+  const selected = deduplicated.slice(0, TARGET_MODEL_COUNT)
+  console.log(`\n🏆 Top ${selected.length} models by weekly usage:`)
+  selected.forEach((m: any, i: number) => {
     console.log(`  ${i + 1}. ${m.id} (ctx: ${m.context_length?.toLocaleString()}, $${m.pricing?.prompt}/tok)`)
   })
 
@@ -207,7 +209,7 @@ async function main() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  const upsertRows = top30.map((m: any) => {
+  const upsertRows = selected.map((m: any) => {
     const provider = inferProvider(m.id)
     return {
       id: m.id,
@@ -243,7 +245,7 @@ async function main() {
     console.log(`\n🆕 New models added: ${newModelIds.join(', ')}`)
   }
 
-  console.log(`\n✅ model_registry updated with ${top30.length} active models.`)
+  console.log(`\n✅ model_registry updated with ${selected.length} active models.`)
 }
 
 main().catch(err => {

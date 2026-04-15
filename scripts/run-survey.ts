@@ -14,7 +14,7 @@ const BATCH_DELAY_MS = 2000
 const MAX_RETRIES = 2
 const REQUEST_TIMEOUT_MS = 120000
 
-/** Baseline (no news): up to this many models × all questions. */
+/** Baseline (no news): up to this many models × all questions. Match TARGET_MODEL_COUNT in update-models.ts. */
 const BASELINE_MODEL_CAP = 50
 /** Informed (with news): up to this many models × each digest slice - keeps news-side API usage bounded. */
 const INFORMED_MODEL_CAP = 15
