@@ -17,6 +17,10 @@
         {
           "modelId": "anthropic/claude-opus-4.6",
           "effectiveFrom": "2026-04-15T00:00:00.000Z"
+        },
+        {
+          "modelId": "anthropic/claude-opus-4.7",
+          "effectiveFrom": "2026-04-16T00:00:00.000Z"
         }
       ]
     },
