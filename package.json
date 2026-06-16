@@ -2,14 +2,19 @@
   "name": "silicon-pulse",
   "version": "0.1.0",
   "private": true,
+  "overrides": {
+    "postcss": "^8.5.15"
+  },
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -H 127.0.0.1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "update-models": "ts-node --project scripts/tsconfig.json scripts/update-models.ts",
+    "sync-anchor-dates": "ts-node --project scripts/tsconfig.json scripts/sync-anchor-dates.ts",
     "build-briefs": "ts-node --project scripts/tsconfig.json scripts/build-briefs.ts",
     "run-survey": "ts-node --project scripts/tsconfig.json scripts/run-survey.ts",
+    "backfill": "ts-node --project scripts/tsconfig.json scripts/backfill.ts",
     "classify-priority-themes": "ts-node --project scripts/tsconfig.json scripts/classify-priority-themes.ts",
     "generate-run-digest": "ts-node --project scripts/tsconfig.json scripts/generate-run-digest.ts",
     "full-run": "bash scripts/full-run.sh"
@@ -19,7 +24,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.8.0",
-    "next": "16.2.3",
+    "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
@@ -33,7 +38,7 @@
     "@types/xml2js": "^0.4.14",
     "dotenv": "^17.4.2",
     "eslint": "^9",
-    "eslint-config-next": "16.2.3",
+    "eslint-config-next": "16.2.9",
     "tailwindcss": "^4",
     "ts-node": "^10.9.2",
     "typescript": "^5"

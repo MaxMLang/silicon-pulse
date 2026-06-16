@@ -45,3 +45,6 @@ next-env.d.ts
 CLAUDE.md
 AGENTS.md
 .claude/
+
+# local one-off / debug scripts
+scripts/_*.ts

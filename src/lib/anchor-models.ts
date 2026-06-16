@@ -24,6 +24,49 @@ export function currentModelIdForLab(def: AnchorDefinition): string {
   return last.modelId
 }
 
+/**
+ * Flagship OpenRouter id for a lab as of a given date (latest segment whose effectiveFrom <= asOf).
+ * Returns null when the lab had no flagship yet at that date (asOf precedes the first segment).
+ * Used by the historical backfill so a "30 days ago" run uses the roster plausibly active then.
+ */
+export function modelIdForLabAtDate(def: AnchorDefinition, asOf: Date): string | null {
+  const sorted = sortSegmentsByEffectiveFrom(def)
+  let chosen: string | null = null
+  for (const seg of sorted) {
+    if (new Date(seg.effectiveFrom).getTime() <= asOf.getTime()) chosen = seg.modelId
+  }
+  return chosen
+}
+
+/** Ordered flagship ids active on a given date (one per lab, file order; skips labs not yet launched). */
+export function anchorModelIdsAtDateOrdered(asOf: Date, config: AnchorModelsFile = file): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const def of config.anchors) {
+    const id = modelIdForLabAtDate(def, asOf)
+    if (id && !seen.has(id)) {
+      seen.add(id)
+      ids.push(id)
+    }
+  }
+  return ids
+}
+
+/** Every distinct OpenRouter id across all anchors and all segments (for registry seeding). */
+export function allAnchorSegmentModelIds(config: AnchorModelsFile = file): string[] {
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const def of config.anchors) {
+    for (const seg of def.segments) {
+      if (!seen.has(seg.modelId)) {
+        seen.add(seg.modelId)
+        ids.push(seg.modelId)
+      }
+    }
+  }
+  return ids
+}
+
 /** All OpenRouter ids ever used for a lab (for filtering historical responses). */
 export function historicalModelIdsForLab(def: AnchorDefinition): string[] {
   return sortSegmentsByEffectiveFrom(def).map(s => s.modelId)

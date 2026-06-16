@@ -64,6 +64,8 @@ export interface ModelRegistry {
   anchor_lab?: string | null
   /** 1–15 from weekly usage leaderboard; null for anchor-only rows. */
   usage_rank?: number | null
+  /** True when the model's weights are openly released (drives the open-source panel filter). */
+  open_weights?: boolean
 }
 
 export interface NewsBrief {
@@ -122,6 +124,8 @@ export interface Response {
   reasoning: string | null
   /** Classifier-assigned policy theme (DB column name unchanged for compatibility). */
   mip_category: string | null
+  /** 0-based draw index within a cell. Anchors are sampled multiple times; others use 0. */
+  sample_index: number
   option_order: string[]
   raw_response: string | null
   error: string | null

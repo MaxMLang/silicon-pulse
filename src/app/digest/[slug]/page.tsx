@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getRunDigestBySlug } from '@/lib/queries'
+import { DigestRunCharts } from '@/components/digest/digest-run-charts'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,6 +51,11 @@ export default async function DigestArticlePage({ params }: { params: Promise<{ 
           </p>
         ))}
       </div>
+
+      <section className="mt-10 pt-6 border-t border-zinc-800">
+        <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-4">Key results</h2>
+        <DigestRunCharts runId={digest.run_id} />
+      </section>
     </article>
   )
 }

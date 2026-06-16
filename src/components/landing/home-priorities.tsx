@@ -86,9 +86,22 @@ function buildDistributions(responses: Row[]): Map<FeedType, ThemeDistribution[]
   return newDists
 }
 
-export function HomePriorities({ runId, feed }: { runId: string; feed: FeedType }) {
-  const [allResponses, setAllResponses] = useState<Row[]>([])
+export function HomePriorities({
+  runId,
+  feed,
+  allowedModelIds,
+}: {
+  runId: string
+  feed: FeedType
+  allowedModelIds?: Set<string> | null
+}) {
+  const [rawResponses, setRawResponses] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+
+  const allResponses = useMemo(
+    () => (allowedModelIds ? rawResponses.filter(r => allowedModelIds.has(r.model_id)) : rawResponses),
+    [rawResponses, allowedModelIds]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -104,7 +117,7 @@ export function HomePriorities({ runId, feed }: { runId: string; feed: FeedType 
         .maybeSingle()
 
       if (!survey || cancelled) {
-        setAllResponses([])
+        setRawResponses([])
         setLoading(false)
         return
       }
@@ -116,7 +129,7 @@ export function HomePriorities({ runId, feed }: { runId: string; feed: FeedType 
         .eq('survey_id', survey.id)
 
       if (!cancelled) {
-        setAllResponses((responses as Row[]) ?? [])
+        setRawResponses((responses as Row[]) ?? [])
         setLoading(false)
       }
     }

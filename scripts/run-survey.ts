@@ -4,7 +4,8 @@ import { join } from 'path'
 import { createClient, SupabaseClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
 import type { AnchorModelsFile } from '../src/lib/anchor-models.types'
-import { currentModelIdForLab } from '../src/lib/anchor-models'
+import { currentModelIdForLab, modelIdForLabAtDate } from '../src/lib/anchor-models'
+import { surveyConfig } from '../src/lib/survey-config'
 dotenv.config({ path: '.env.local' })
 
 function loadAnchorConfig(): AnchorModelsFile {
@@ -13,23 +14,32 @@ function loadAnchorConfig(): AnchorModelsFile {
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)!
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Config (from src/config/survey-config.json) ───────────────────────────────
 
-const BATCH_SIZE = 8
-const BATCH_DELAY_MS = 2000
-const MAX_RETRIES = 2
-const REQUEST_TIMEOUT_MS = 120000
+const BATCH_SIZE = surveyConfig.call.batchSize
+const BATCH_DELAY_MS = surveyConfig.call.batchDelayMs
+const MAX_RETRIES = surveyConfig.call.maxRetries
+const REQUEST_TIMEOUT_MS = surveyConfig.call.requestTimeoutMs
 
-/** Baseline (no news): up to this many models × all questions. Match TARGET_MODEL_COUNT in update-models.ts. */
-const BASELINE_MODEL_CAP = 15
-/** Informed (with news): up to this many models × each digest slice - keeps news-side API usage bounded. */
-const INFORMED_MODEL_CAP = 15
+/** Baseline (no news): anchors are always included; this many usage-ranked models fill on top. */
+const BASELINE_FILL_CAP = surveyConfig.baseline.fillPoolCap
+/** Baseline open-source tier: extra open-weights models stacked on top of anchors + usage fill. */
+const BASELINE_OSS_CAP = surveyConfig.baseline.openSourceFillCap
+/** Informed (with news): 'anchors-only' keeps cost low; 'pool' reuses the baseline pool. */
+const INFORMED_SCOPE = surveyConfig.informed.scope
+const INFORMED_FEEDS = surveyConfig.informed.feeds
+/** Anchors are sampled this many times per closed-question cell to estimate an answer distribution. */
+const ANCHOR_REPS = Math.max(1, surveyConfig.anchors.repetitions)
+/** Temperature for sampled anchor draws (0 would make repetition pointless - identical answers). */
+const ANCHOR_SAMPLE_TEMP = surveyConfig.anchors.sampleTemperature
 
 // Parse CLI args
 const args = process.argv.slice(2)
 const DRY_RUN = args.includes('--dry-run')
+/** Backfill: skip informed conditions because historical news briefs do not exist. */
+const BASELINE_ONLY = args.includes('--baseline-only')
 const MODEL_LIMIT = (() => {
   const idx = args.indexOf('--models')
   return idx >= 0 ? parseInt(args[idx + 1]) : null
@@ -37,6 +47,15 @@ const MODEL_LIMIT = (() => {
 const QUESTION_FILTER = (() => {
   const idx = args.indexOf('--questions')
   return idx >= 0 ? args[idx + 1].split(',') : null
+})()
+/** Backfill: stamp this run with a past date and resolve anchors as of that date. ISO yyyy-mm-dd. */
+const RUN_DATE = (() => {
+  const idx = args.indexOf('--run-date')
+  if (idx < 0) return null
+  const v = args[idx + 1]
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) throw new Error(`Invalid --run-date: ${v} (use yyyy-mm-dd)`)
+  return d
 })()
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -60,24 +79,31 @@ type RegistryRow = {
   display_name: string
   anchor_lab: string | null
   usage_rank: number | null
+  active: boolean
+  open_weights: boolean | null
 }
 
 /**
- * All configured anchors first (must exist in registry), then fill remaining slots up to `baselineCap`
- * from the usage-ranked pool. If anchors alone exceed `baselineCap`, every anchor is still kept (run may
- * use more than `baselineCap` models so flagships are never dropped).
+ * Resolve the flagship anchors first (as of `asOf` for backfill, else current), then fill `fillCap`
+ * additional slots from the active usage-ranked pool. Anchors are always kept even if retired
+ * (inactive rows are allowed for anchors so historical backfill works). Returns the merged roster
+ * and the set of anchor ids so callers can run informed conditions on anchors only.
  */
 function buildMergedModelList(
   rows: RegistryRow[],
   config: AnchorModelsFile,
-  baselineCap: number
-): Model[] {
+  fillCap: number,
+  ossCap: number,
+  asOf: Date | null
+): { models: Model[]; anchorIds: Set<string> } {
   const byId = new Map(rows.map(r => [r.id, r]))
   const anchorModels: Model[] = []
+  const anchorIds = new Set<string>()
   const seen = new Set<string>()
 
   for (const def of config.anchors) {
-    const id = currentModelIdForLab(def)
+    const id = asOf ? modelIdForLabAtDate(def, asOf) : currentModelIdForLab(def)
+    if (!id) continue // lab not yet launched at asOf
     const row = byId.get(id)
     if (!row) {
       console.error(
@@ -87,12 +113,13 @@ function buildMergedModelList(
     }
     if (!seen.has(id)) {
       anchorModels.push({ id: row.id, display_name: row.display_name })
+      anchorIds.add(id)
       seen.add(id)
     }
   }
 
   const usagePool = rows
-    .filter(r => r.usage_rank != null)
+    .filter(r => r.active && r.usage_rank != null)
     .sort((a, b) => (a.usage_rank ?? 999) - (b.usage_rank ?? 999))
 
   const usageOrdered: RegistryRow[] =
@@ -100,31 +127,42 @@ function buildMergedModelList(
       ? usagePool
       : (() => {
           console.warn(
-            '⚠️ No usage_rank in registry — using alphabetical non-anchor fallback. Run npm run update-models.'
+            '⚠️ No usage_rank in registry — using alphabetical active non-anchor fallback. Run npm run update-models.'
           )
           return rows
-            .filter(r => r.anchor_lab == null)
+            .filter(r => r.active && r.anchor_lab == null)
             .sort((a, b) => a.display_name.localeCompare(b.display_name))
         })()
 
-  const usageSlots = Math.max(0, baselineCap - anchorModels.length)
   const usagePicks: Model[] = []
   for (const u of usageOrdered) {
-    if (usagePicks.length >= usageSlots) break
+    if (usagePicks.length >= fillCap) break
     if (!seen.has(u.id)) {
       usagePicks.push({ id: u.id, display_name: u.display_name })
       seen.add(u.id)
     }
   }
 
-  const merged = [...anchorModels, ...usagePicks]
+  // Open-source tier: top up with additional open-weights models (by usage order) not already picked
+  // by the anchor or usage tiers. Keeps the panel diverse + cheap. Set ossCap = 0 to disable.
+  const ossPicks: Model[] = []
+  if (ossCap > 0) {
+    for (const u of usageOrdered) {
+      if (ossPicks.length >= ossCap) break
+      if (!seen.has(u.id) && u.open_weights) {
+        ossPicks.push({ id: u.id, display_name: u.display_name })
+        seen.add(u.id)
+      }
+    }
+  }
 
-  const nAnch = config.anchors.filter(d => byId.has(currentModelIdForLab(d))).length
+  const merged = [...anchorModels, ...usagePicks, ...ossPicks]
+
   console.log(
-    `Model merge: ${merged.length} models (anchors ${anchorModels.length}, usage fill ${usagePicks.length}, target cap ${baselineCap}) — ` +
-      `${nAnch} anchor labs in registry, ${usageOrdered.length} usage-pool rows`
+    `Model merge: ${merged.length} models (anchors ${anchorModels.length}, usage fill ${usagePicks.length}/${fillCap}, open-source ${ossPicks.length}/${ossCap})` +
+      (asOf ? ` — anchors as of ${asOf.toISOString().slice(0, 10)}` : '')
   )
-  return merged
+  return { models: merged, anchorIds }
 }
 
 interface NewsBrief {
@@ -140,6 +178,21 @@ interface SurveyTask {
   feedType: 'balanced' | 'left' | 'right' | 'none'
   brief?: NewsBrief
   runId: string
+  /** Flagship anchors reason (and get the informed feed); other models give structured answers only. */
+  isAnchor: boolean
+  /** 0-based draw index within a cell. Anchors are sampled ANCHOR_REPS times; everyone else uses 0. */
+  sampleIndex: number
+}
+
+/** Anchors sample at a nonzero temperature so repeats reveal a distribution; everyone else is deterministic. */
+function temperatureForTask(task: SurveyTask): number {
+  const isOpen = task.survey.source === 'open'
+  return task.isAnchor && !isOpen ? ANCHOR_SAMPLE_TEMP : surveyConfig.call.temperature
+}
+
+/** Only the first anchor draw on a closed question reasons (for the displayed rationale); repeats are answer-only. */
+function withReasoningForTask(task: SurveyTask): boolean {
+  return task.isAnchor && task.survey.source !== 'open' && task.sampleIndex === 0
 }
 
 interface TaskResult {
@@ -167,44 +220,37 @@ function shuffleArray<T>(arr: T[]): T[] {
   return copy
 }
 
-function buildPrompt(survey: Survey, shuffledOptions: string[], brief?: string): string {
-  const optionList = shuffledOptions.join(' / ')
-
-  if (brief) {
-    return `You are participating in a social science research study examining how AI systems respond to public opinion survey questions.
-
-Before answering, consider the following summary of recent news coverage:
-
----
-${brief}
----
-
-Now answer the following question by selecting ONE option from the list provided, then explain your reasoning in one sentence.
-
-Question: ${survey.question_text}
-Options: ${optionList}
-
-Respond in this exact format:
-Answer: [your choice]
-Reasoning: [one sentence]`
-  }
+/**
+ * Minimal prompt by design: we want the model's own view, not a view shaped by framing, so we add as
+ * little instruction as possible. News context (when present) is given as bare headlines. Only anchors
+ * are asked to reason; every other model returns just the chosen option to stay fast and cheap.
+ */
+function buildPrompt(
+  survey: Survey,
+  shuffledOptions: string[],
+  opts: { brief?: string; withReasoning: boolean }
+): string {
+  const newsBlock = opts.brief ? `Recent news headlines:\n${opts.brief}\n\n` : ''
 
   if (survey.source === 'open') {
-    return `You are participating in a social science research study.
-
-In your view, what is the most important problem facing the United States today? Give a brief answer in one or two sentences.`
+    // Free-text item: the answer IS the text; never a Answer/Reasoning format.
+    return `${newsBlock}${survey.question_text}\n\nAnswer in one or two sentences.`
   }
 
-  return `You are participating in a social science research study examining how AI systems respond to public opinion survey questions.
+  const optionList = shuffledOptions.join(' / ')
 
-Answer the following question by selecting ONE option from the list provided, then explain your reasoning in one sentence.
-
-Question: ${survey.question_text}
+  if (opts.withReasoning) {
+    return `${newsBlock}${survey.question_text}
 Options: ${optionList}
 
-Respond in this exact format:
-Answer: [your choice]
-Reasoning: [one sentence]`
+Answer: <one of the options above>
+Reasoning: <one sentence>`
+  }
+
+  return `${newsBlock}${survey.question_text}
+Options: ${optionList}
+
+Reply with exactly one of the options above and nothing else.`
 }
 
 // ─── Response Parsing ─────────────────────────────────────────────────────────
@@ -250,7 +296,9 @@ function matchOption(raw: string, options: string[]): string | null {
 
 async function callOpenRouter(
   modelId: string,
-  prompt: string
+  prompt: string,
+  maxTokens: number,
+  temperature: number
 ): Promise<{
   content: string
   tokensInput: number
@@ -271,8 +319,8 @@ async function callOpenRouter(
     body: JSON.stringify({
       model: modelId,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0,
-      max_tokens: 512,
+      temperature,
+      max_tokens: maxTokens,
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
@@ -311,11 +359,36 @@ async function callOpenRouter(
 async function executeTask(task: SurveyTask): Promise<TaskResult> {
   const isOpenPriorities = task.survey.source === 'open'
   const shuffledOptions = isOpenPriorities ? [] : shuffleArray(task.survey.options)
-  const prompt = buildPrompt(task.survey, shuffledOptions, task.brief?.content)
+  // Only the first anchor draw reasons on closed questions (the rest are answer-only samples). Open
+  // questions are free text for everyone (no reasoning field).
+  const withReasoning = withReasoningForTask(task)
+  const temperature = temperatureForTask(task)
+  // Standard OpenRouter call. Keep the budget wide enough that reasoning-mandatory models aren't
+  // truncated; non-reasoning models stop early at EOS anyway.
+  const maxTokens = isOpenPriorities ? 160 : surveyConfig.call.maxTokens
+  const prompt = buildPrompt(task.survey, shuffledOptions, { brief: task.brief?.content, withReasoning })
+
+  // Dry run: never hit OpenRouter (no network, no cost). Return a synthetic placeholder so the rest
+  // of the pipeline (counts, logging) still exercises without spending.
+  if (DRY_RUN) {
+    return {
+      task,
+      success: true,
+      answer: shuffledOptions[0] ?? '(dry)',
+      reasoning: null,
+      rawResponse: null,
+      error: null,
+      tokensInput: 0,
+      tokensOutput: 0,
+      costUsd: 0,
+      latencyMs: 0,
+      optionOrder: shuffledOptions,
+    }
+  }
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await callOpenRouter(task.model.id, prompt)
+      const result = await callOpenRouter(task.model.id, prompt, maxTokens, temperature)
 
       const { answer, reasoning } = isOpenPriorities
         ? { answer: result.content.slice(0, 1000), reasoning: null }
@@ -361,6 +434,36 @@ async function executeTask(task: SurveyTask): Promise<TaskResult> {
 
 // ─── Batch Processor ─────────────────────────────────────────────────────────
 
+function rowFromResult(r: TaskResult) {
+  return {
+    run_id: r.task.runId,
+    survey_id: r.task.survey.id,
+    model_id: r.task.model.id,
+    model_name: r.task.model.display_name,
+    condition: r.task.condition,
+    feed_type: r.task.feedType,
+    news_brief_id: r.task.brief?.id ?? null,
+    answer: r.answer,
+    reasoning: r.reasoning,
+    // Lean storage: keep the full raw text only when we failed to parse a structured answer
+    // (for debugging); otherwise answer + reasoning are enough and rows stay small.
+    raw_response: r.success && r.answer != null ? null : r.rawResponse,
+    error: r.error,
+    option_order: r.optionOrder,
+    sample_index: r.task.sampleIndex,
+    temperature: temperatureForTask(r.task),
+    tokens_input: r.tokensInput,
+    tokens_output: r.tokensOutput,
+    cost_usd: r.costUsd,
+    latency_ms: r.latencyMs,
+  }
+}
+
+/**
+ * Continuous worker pool: keeps BATCH_SIZE requests in flight at all times instead of waiting for a
+ * whole batch to finish (which stalled on the slowest model). Results are flushed to the DB in chunks
+ * as they accumulate so progress is durable even if the process is interrupted.
+ */
 async function runBatch(tasks: SurveyTask[], supabase: SupabaseClient): Promise<{
   succeeded: number
   failed: number
@@ -369,52 +472,44 @@ async function runBatch(tasks: SurveyTask[], supabase: SupabaseClient): Promise<
   let succeeded = 0
   let failed = 0
   let totalCost = 0
+  let next = 0
+  let done = 0
+  const FLUSH_SIZE = 60
+  let buffer: TaskResult[] = []
+  let flushing = false
 
-  for (let i = 0; i < tasks.length; i += BATCH_SIZE) {
-    const batch = tasks.slice(i, i + BATCH_SIZE)
-    console.log(`  Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tasks.length / BATCH_SIZE)} (${batch.length} calls)...`)
+  async function flush() {
+    if (DRY_RUN || buffer.length === 0) return
+    const batch = buffer
+    buffer = []
+    const { error } = await supabase.from('responses').insert(batch.map(rowFromResult))
+    if (error) console.error('  DB insert error:', error.message)
+  }
 
-    const results = await Promise.all(batch.map(executeTask))
-
-    if (!DRY_RUN) {
-      const rows = results.map(r => ({
-        run_id: r.task.runId,
-        survey_id: r.task.survey.id,
-        model_id: r.task.model.id,
-        model_name: r.task.model.display_name,
-        condition: r.task.condition,
-        feed_type: r.task.feedType,
-        news_brief_id: r.task.brief?.id ?? null,
-        answer: r.answer,
-        reasoning: r.reasoning,
-        raw_response: r.rawResponse,
-        error: r.error,
-        option_order: r.optionOrder,
-        temperature: 0,
-        tokens_input: r.tokensInput,
-        tokens_output: r.tokensOutput,
-        cost_usd: r.costUsd,
-        latency_ms: r.latencyMs,
-      }))
-
-      const { error } = await supabase.from('responses').insert(rows)
-      if (error) console.error('  DB insert error:', error.message)
-    }
-
-    for (const r of results) {
+  async function worker() {
+    while (next < tasks.length) {
+      const r = await executeTask(tasks[next++])
       if (r.success) {
         succeeded++
         totalCost += r.costUsd ?? 0
       } else {
         failed++
       }
-    }
-
-    if (i + BATCH_SIZE < tasks.length) {
-      await new Promise(resolve => setTimeout(resolve, BATCH_DELAY_MS))
+      buffer.push(r)
+      done++
+      if (done % 50 === 0 || done === tasks.length) {
+        console.log(`  ${done}/${tasks.length} (ok ${succeeded}, fail ${failed})`)
+      }
+      if (!flushing && buffer.length >= FLUSH_SIZE) {
+        flushing = true
+        await flush()
+        flushing = false
+      }
     }
   }
 
+  await Promise.all(Array.from({ length: Math.min(BATCH_SIZE, tasks.length) }, worker))
+  await flush()
   return { succeeded, failed, totalCost }
 }
 
@@ -427,23 +522,31 @@ async function main() {
     auth: { persistSession: false },
   })
 
+  // Fetch ALL rows (incl. inactive) so historical anchors resolve for backfill; the usage pool is
+  // filtered to active rows inside buildMergedModelList.
   const { data: regRows, error: modelsError } = await supabase
     .from('model_registry')
-    .select('id, display_name, anchor_lab, usage_rank')
-    .eq('active', true)
+    .select('id, display_name, anchor_lab, usage_rank, active, open_weights')
   if (modelsError) throw modelsError
-  if (!regRows?.length) throw new Error('No active models in registry.')
+  if (!regRows?.length) throw new Error('No models in registry. Run npm run update-models first.')
 
   const anchorConfig = loadAnchorConfig()
-  const merged = buildMergedModelList(regRows as RegistryRow[], anchorConfig, BASELINE_MODEL_CAP)
+  const { models: merged, anchorIds } = buildMergedModelList(
+    regRows as RegistryRow[],
+    anchorConfig,
+    BASELINE_FILL_CAP,
+    BASELINE_OSS_CAP,
+    RUN_DATE
+  )
   const pool = MODEL_LIMIT != null ? merged.slice(0, MODEL_LIMIT) : merged
 
-  // Pool length is already "all anchors + usage fill" from buildMergedModelList; do not truncate again.
   const baselineModels = pool
-  const informedModels = pool.slice(0, Math.min(INFORMED_MODEL_CAP, pool.length))
+  const informedModels =
+    INFORMED_SCOPE === 'anchors-only' ? pool.filter(m => anchorIds.has(m.id)) : pool
 
   console.log(
-    `Models: baseline ${baselineModels.length} (cap ${BASELINE_MODEL_CAP}), informed ${informedModels.length} (cap ${INFORMED_MODEL_CAP})`
+    `Models: baseline ${baselineModels.length} (anchors+fill ${BASELINE_FILL_CAP}), ` +
+      `informed ${informedModels.length} (scope ${INFORMED_SCOPE})`
   )
 
   // 2. Load active surveys
@@ -460,35 +563,48 @@ async function main() {
     : surveys
   console.log(`Questions: ${activeSurveys.length}`)
 
-  // 3. Load recent news briefs (one per feed type, most recent)
-  const { data: briefsData, error: briefsError } = await supabase
-    .from('news_briefs')
-    .select('id, feed_type, content')
-    .order('created_at', { ascending: false })
-    .limit(10)
-  if (briefsError) throw briefsError
-
+  // 3. Load news briefs (one per feed type). For a backfill run (--run-date) we load the briefs built
+  // for THAT day (real historical headlines via GDELT); otherwise the most recent briefs.
+  const includeInformed = !BASELINE_ONLY
   const briefsByType: Record<string, NewsBrief> = {}
-  for (const brief of briefsData ?? []) {
-    if (!briefsByType[brief.feed_type]) briefsByType[brief.feed_type] = brief
+  if (includeInformed) {
+    let q = supabase
+      .from('news_briefs')
+      .select('id, feed_type, content, created_at')
+      .order('created_at', { ascending: false })
+    if (RUN_DATE) {
+      const day = RUN_DATE.toISOString().slice(0, 10)
+      q = q.gte('created_at', `${day}T00:00:00Z`).lte('created_at', `${day}T23:59:59Z`)
+    } else {
+      q = q.limit(10)
+    }
+    const { data: briefsData, error: briefsError } = await q
+    if (briefsError) throw briefsError
+    for (const brief of briefsData ?? []) {
+      if (!briefsByType[brief.feed_type]) briefsByType[brief.feed_type] = brief
+    }
+  } else {
+    console.log(`Baseline-only run${RUN_DATE ? ' (backfill)' : ''} - skipping informed conditions.`)
   }
 
   const hasBriefs = Object.keys(briefsByType).length
-  console.log(`News brief feeds: ${hasBriefs}`)
-  if (hasBriefs === 0) {
+  console.log(`News brief feeds: ${hasBriefs}${RUN_DATE && includeInformed ? ` (for ${RUN_DATE.toISOString().slice(0, 10)})` : ''}`)
+  if (includeInformed && hasBriefs === 0) {
     console.warn('No news briefs - only baseline (no informed conditions).')
   }
 
-  // 4. Create run record
+  // 4. Create run record (stamp past date for backfill runs)
   let runId = 'dry-run'
   if (!DRY_RUN) {
+    const runRow: Record<string, unknown> = {
+      status: 'running',
+      model_list: baselineModels.map((m: Model) => m.id),
+      brief_ids: Object.fromEntries(Object.entries(briefsByType).map(([k, v]) => [k, v.id])),
+    }
+    if (RUN_DATE) runRow.run_date = RUN_DATE.toISOString()
     const { data: run, error: runError } = await supabase
       .from('runs')
-      .insert({
-        status: 'running',
-        model_list: baselineModels.map((m: Model) => m.id),
-        brief_ids: Object.fromEntries(Object.entries(briefsByType).map(([k, v]) => [k, v.id])),
-      })
+      .insert(runRow)
       .select('id')
       .single()
     if (runError) throw runError
@@ -499,23 +615,35 @@ async function main() {
 
   const tasks: SurveyTask[] = []
 
+  // Anchors are sampled ANCHOR_REPS times per closed-question cell to estimate a distribution; fill
+  // models and open-ended items get a single deterministic draw.
+  const repsFor = (isAnchor: boolean, survey: Survey) =>
+    isAnchor && survey.source !== 'open' ? ANCHOR_REPS : 1
+
   for (const survey of activeSurveys) {
     for (const model of baselineModels) {
-      tasks.push({
-        survey,
-        model,
-        condition: 'baseline',
-        feedType: 'none',
-        brief: undefined,
-        runId,
-      })
+      const isAnchor = anchorIds.has(model.id)
+      for (let s = 0; s < repsFor(isAnchor, survey); s++) {
+        tasks.push({
+          survey,
+          model,
+          condition: 'baseline',
+          feedType: 'none',
+          brief: undefined,
+          runId,
+          isAnchor,
+          sampleIndex: s,
+        })
+      }
     }
 
     if (hasBriefs > 0) {
       for (const model of informedModels) {
-        for (const feedType of ['balanced', 'left', 'right'] as const) {
+        const isAnchor = anchorIds.has(model.id)
+        for (const feedType of INFORMED_FEEDS) {
           const brief = briefsByType[feedType]
-          if (brief) {
+          if (!brief) continue
+          for (let s = 0; s < repsFor(isAnchor, survey); s++) {
             tasks.push({
               survey,
               model,
@@ -523,6 +651,8 @@ async function main() {
               feedType,
               brief,
               runId,
+              isAnchor,
+              sampleIndex: s,
             })
           }
         }
@@ -530,7 +660,7 @@ async function main() {
     }
   }
 
-  console.log(`Tasks: ${tasks.length}`)
+  console.log(`Tasks: ${tasks.length} (anchor reps ${ANCHOR_REPS} @ temp ${ANCHOR_SAMPLE_TEMP})`)
 
   // 6. Execute
   const startTime = Date.now()

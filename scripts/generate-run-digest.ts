@@ -3,12 +3,14 @@ import { createClient } from '@supabase/supabase-js'
 import { format, parseISO } from 'date-fns'
 import * as dotenv from 'dotenv'
 import { normalizePriorityThemeLabel } from '../src/lib/priority-theme-display'
+import { surveyConfig } from '../src/lib/survey-config'
 dotenv.config({ path: '.env.local' })
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
-const OVERRIDE_AUTHOR = process.env.DIGEST_AUTHOR_MODEL_ID?.trim() || null
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)!
+// Author precedence: env override → survey-config.json digestAuthor (cheap by default) → first model in roster.
+const OVERRIDE_AUTHOR = process.env.DIGEST_AUTHOR_MODEL_ID?.trim() || surveyConfig.models.digestAuthor || null
 
 const args = process.argv.slice(2)
 const RUN_IDX = args.indexOf('--run-id')
@@ -68,57 +70,93 @@ async function resolveAuthor(supabase: any, run: RunRow) {
     .eq('id', authorId)
     .maybeSingle()
   if (error) throw error
-  if (!reg) throw new Error(`Author model ${authorId} not found in model_registry.`)
-  const row = reg as { id: string; display_name: string }
-  return { id: row.id, display_name: row.display_name }
+  if (reg) {
+    const row = reg as { id: string; display_name: string }
+    return { id: row.id, display_name: row.display_name }
+  }
+  // Configured cheap author may not be in the active registry; synthesize a display name rather than fail.
+  console.warn(`Author model ${authorId} not in model_registry — using synthesized display name.`)
+  return { id: authorId, display_name: authorId.split('/').pop() ?? authorId }
+}
+
+/** Count answers and return the plurality + runner-up. */
+function pluralityOf(rows: ResponseRow[]): {
+  total: number
+  top: string
+  topPct: number
+  second: string | null
+  secondPct: number
+} {
+  const counts: Record<string, number> = {}
+  for (const r of rows) {
+    if (!r.answer) continue
+    counts[r.answer] = (counts[r.answer] ?? 0) + 1
+  }
+  const total = Object.values(counts).reduce((a, b) => a + b, 0)
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1])
+  const top = sorted[0]
+  const second = sorted[1]
+  return {
+    total,
+    top: top?.[0] ?? '-',
+    topPct: top && total ? Math.round((top[1] / total) * 100) : 0,
+    second: second?.[0] ?? null,
+    secondPct: second && total ? Math.round((second[1] / total) * 100) : 0,
+  }
 }
 
 async function collectFacts(
-  supabase: any,
+  _supabase: any,
   run: RunRow,
   surveys: SurveyRow[],
   responses: ResponseRow[]
 ) {
   const baseline = responses.filter(isBaseline).filter(r => r.answer)
+  const informed = responses.filter(r => r.condition === 'informed').filter(r => r.answer)
 
-  const closedSummaries: { id: string; topic: string; plurality: string; sharePct: number }[] = []
+  const closedSummaries: {
+    id: string
+    topic: string
+    plurality: string
+    sharePct: number
+    runnerUp: string | null
+    runnerUpPct: number
+  }[] = []
+  const newsShifts: { id: string; topic: string; baseline: string; informed: string }[] = []
   const openThemes: Record<string, number> = {}
 
   for (const s of surveys) {
-    const rows = baseline.filter(r => r.survey_id === s.id)
     if (s.source === 'open' || !s.options?.length) {
-      for (const r of rows) {
+      for (const r of baseline.filter(r => r.survey_id === s.id)) {
         const t = normalizePriorityThemeLabel(r.mip_category)
         openThemes[t] = (openThemes[t] ?? 0) + 1
       }
       continue
     }
-    const counts: Record<string, number> = {}
-    for (const r of rows) {
-      if (!r.answer) continue
-      counts[r.answer] = (counts[r.answer] ?? 0) + 1
-    }
-    const total = Object.values(counts).reduce((a, b) => a + b, 0)
-    if (total === 0) continue
-    let top = ''
-    let topN = 0
-    for (const [k, v] of Object.entries(counts)) {
-      if (v > topN) {
-        topN = v
-        top = k
-      }
-    }
-    const sharePct = Math.round((topN / total) * 100)
+    const base = pluralityOf(baseline.filter(r => r.survey_id === s.id))
+    if (base.total === 0) continue
     closedSummaries.push({
       id: s.question_id,
       topic: s.topic,
-      plurality: top || '-',
-      sharePct,
+      plurality: base.top,
+      sharePct: base.topPct,
+      runnerUp: base.second,
+      runnerUpPct: base.secondPct,
     })
+
+    // News sensitivity: did the informed (news-context) plurality differ from baseline?
+    const inf = pluralityOf(informed.filter(r => r.survey_id === s.id))
+    if (inf.total > 0 && inf.top !== base.top) {
+      newsShifts.push({ id: s.question_id, topic: s.topic, baseline: base.top, informed: inf.top })
+    }
   }
 
+  const byShare = [...closedSummaries].sort((a, b) => b.sharePct - a.sharePct)
+  const mostUnified = byShare.slice(0, 3)
+  const mostDivided = [...byShare].reverse().slice(0, 3)
+
   const themeTotal = Object.values(openThemes).reduce((a, b) => a + b, 0)
-  const themeLines =
+  const priorityThemes =
     themeTotal > 0
       ? Object.entries(openThemes)
           .sort((a, b) => b[1] - a[1])
@@ -130,29 +168,38 @@ async function collectFacts(
     runDate: dateDisplay(run),
     modelCount: Array.isArray(run.model_list) ? run.model_list.length : 0,
     questionCount: surveys.length,
+    hadNewsContext: informed.length > 0,
+    mostUnified,
+    mostDivided,
     closedForm: closedSummaries,
-    openPrioritiesThemes: themeLines,
+    newsShifts,
+    openPrioritiesThemes: priorityThemes,
   }
 }
 
 async function generateBody(authorModelId: string, facts: object): Promise<string> {
-  const prompt = `You are writing a short editorial briefing for the Silicon Pulse research project - a longitudinal survey of many large language models on policy and technology questions, with and without news context.
+  const prompt = `You are the in-house writer for Silicon Pulse - a research project that puts the same survey battery to many large language models on a schedule, with and without recent news context, and tracks how the panel answers over time.
 
-Use ONLY the facts below. Do not invent statistics, poll numbers, or external events.
+Use ONLY the facts in the JSON below. Do not invent statistics, poll numbers, named events, or quotes. If a fact is absent, do not speculate about it.
 
 FACTS (JSON):
 ${JSON.stringify(facts, null, 2)}
 
-Write a concise newsletter-style briefing (about 400–650 words). Use plain text only. You may use short ALL CAPS section labels on their own lines (e.g. "SNAPSHOT") followed by a blank line. Include:
-- What this run covered (date, rough scope)
-- 2–3 patterns in the closed-form plurality summaries (refer by topic or question id, not long quotes)
-- The open-priorities theme mix if present
-- One restrained sentence on interpretation: these are model completions under a fixed protocol, not human beliefs.
+Write a substantial newsletter-style briefing of about 700–1000 words in plain text. Use short ALL-CAPS section labels on their own line (each followed by a blank line). Write in clear, measured prose - analytical, not breathless. Cover, in roughly this order:
 
-Never mention API costs, dollar amounts, token counts, or internal tooling.
+OVERVIEW - what this run covered: the date, how many models answered, how many questions, and whether news context was included this run.
 
-Do not include a sign-off or byline inside the text - authorship is stored separately.
-Do not use Markdown # headings; avoid bullet characters if possible or use simple dashes.`
+WHERE THE PANEL AGREES - discuss 2-3 items from "mostUnified" (highest plurality share). Refer to questions by their topic or id and give the plurality answer and its share. Note what broad agreement here does and does not imply.
+
+WHERE IT DIVIDES - discuss 2-3 items from "mostDivided" (lowest plurality share). Mention the plurality and the runner-up where useful, and frame these as genuinely contested rather than errors.
+
+NEWS SENSITIVITY - if "hadNewsContext" is true, discuss "newsShifts": questions where the news-context plurality differed from the no-news baseline. If there were no shifts, say plainly that news context moved little this run. If there was no news context, omit this section.
+
+PRIORITIES - summarize the "openPrioritiesThemes" mix (the open-ended "most important issue" item), naming the leading themes and their shares.
+
+INTERPRETATION - two to four restrained sentences: these are model completions under one fixed, minimally-worded protocol; aggregate "agreement" reflects how concentrated the model answers are, not human opinion or model "beliefs"; flagship models are sampled several times so their answers carry an internal consistency signal.
+
+Never mention API costs, dollar amounts, token counts, providers' pricing, or internal tooling. Do not include a sign-off or byline. Do not use Markdown # headings or bullet characters; use plain paragraphs and the ALL-CAPS labels only.`
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -164,10 +211,10 @@ Do not use Markdown # headings; avoid bullet characters if possible or use simpl
     body: JSON.stringify({
       model: authorModelId,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.45,
-      max_tokens: 2200,
+      temperature: 0.5,
+      max_tokens: 4000,
     }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(180000),
   })
 
   if (!res.ok) {

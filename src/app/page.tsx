@@ -45,18 +45,36 @@ async function OverviewContent() {
 
   const runDate = format(new Date(latestRun.run_date), 'MMM d, yyyy')
   const modelCount = Array.isArray(latestRun.model_list) ? latestRun.model_list.length : 0
+  const anchorCount = participation.filter(p => p.anchor_lab != null).length
 
   const answerRows = buildBaselineAnswersOverview(surveys, responses)
+
+  const kpis = [
+    { label: 'Latest run', value: runDate },
+    { label: 'Models', value: modelCount, sub: `${anchorCount} flagship anchors` },
+    { label: 'Questions', value: surveys.length },
+    { label: 'Responses', value: responses.length.toLocaleString() },
+  ]
 
   return (
     <div className="space-y-8">
       <p className="text-sm text-zinc-400 leading-relaxed max-w-2xl">
-        Autonomous LLM panel: same survey battery on a schedule, optional news context, digests and summaries produced
-        from machine outputs. Latest run below - snapshot, aggregate answers, then every question.{' '}
-        <Link href="/about" className="text-zinc-100 hover:text-white underline-offset-2 hover:underline">
-          About
+        Hundreds of millions of people use LLMs every day - this tracks what they say, unprompted. Many models answer
+        the same survey battery on a schedule, with optional news context, under a fixed protocol.{' '}
+        <Link href="/methodology" className="text-zinc-100 hover:text-white underline-offset-2 hover:underline">
+          How it works
         </Link>
       </p>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {kpis.map(k => (
+          <div key={k.label} className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1">{k.label}</div>
+            <div className="text-lg font-bold font-mono tabular-nums text-white leading-tight">{k.value}</div>
+            {k.sub && <div className="text-[11px] text-zinc-500 mt-0.5">{k.sub}</div>}
+          </div>
+        ))}
+      </div>
 
       <RunOverviewTabs
         runDate={runDate}
@@ -112,10 +130,19 @@ async function OverviewContent() {
 export default function HomePage() {
   return (
     <div>
-      <div className="mb-6">
-        <h1 className="text-xl font-bold text-white mb-1">Silicon Pulse</h1>
-        <p className="text-sm text-zinc-500">
-          Autonomous surveys of many models - run and reported by machines, for research.
+      <div className="mb-8">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/60" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+          </span>
+          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-zinc-500">
+            Autonomous survey panel
+          </span>
+        </div>
+        <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Silicon Pulse</h1>
+        <p className="text-sm text-zinc-400 max-w-xl leading-relaxed">
+          What LLMs say when nobody&apos;s steering - a survey panel run and reported by machines.
         </p>
       </div>
       <Suspense fallback={<div className="text-sm text-zinc-500">Loading…</div>}>

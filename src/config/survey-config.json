@@ -1,0 +1,46 @@
+{
+  "$comment": "Central knobs for cost / cadence / model selection. Edit here instead of in scripts. See src/lib/survey-config.ts for the typed loader.",
+  "baseline": {
+    "comment": "Baseline (no news) panel = 3 stackable tiers, deduped: (1) the 5 flagship anchors (always in); (2) fillPoolCap top usage-ranked models; (3) openSourceFillCap additional open-weights models. 5 + 10 + 15 ≈ 30-model panel. Each tier is also a dashboard filter (anchors / usage / open-source).",
+    "fillPoolCap": 10,
+    "openSourceFillCap": 15
+  },
+  "informed": {
+    "comment": "Informed (with news). scope 'anchors-only' keeps the news-assisted portion cheap; 'pool' would reuse the full baseline pool. fillPoolCap only applies when scope = 'pool'.",
+    "scope": "anchors-only",
+    "fillPoolCap": 0,
+    "feeds": ["balanced", "left", "right"]
+  },
+  "anchors": {
+    "comment": "Anchors are sampled `repetitions` times per cell at `sampleTemperature` so we can show an answer DISTRIBUTION (with uncertainty), not a single argmax. Draw #0 is reasoned (for the displayed rationale); draws #1..N are answer-only and cheap. Fill models stay at 1 deterministic draw. Repetition applies to closed questions only (open free-text stays at 1).",
+    "repetitions": 5,
+    "sampleTemperature": 0.7
+  },
+  "registry": {
+    "comment": "How many usage-ranked text-generation families update-models keeps active (in addition to anchors). Kept large so the active pool holds enough open-weights models to fill the open-source tier (fillPoolCap + openSourceFillCap).",
+    "targetModelCount": 30,
+    "minContextLength": 8192
+  },
+  "models": {
+    "comment": "Cheap models for the autonomous summarizer/classifier/digest so cost stays low. digestAuthor null = first model in the run roster (a flagship). The report/digest is written by a cheap open-source model (gpt-oss-120b).",
+    "summarizer": "anthropic/claude-haiku-4-5",
+    "classifier": "anthropic/claude-haiku-4-5",
+    "digestAuthor": "openai/gpt-oss-120b"
+  },
+  "call": {
+    "comment": "Per-request settings for survey calls.",
+    "temperature": 0,
+    "maxTokens": 512,
+    "batchSize": 24,
+    "batchDelayMs": 600,
+    "maxRetries": 2,
+    "requestTimeoutMs": 120000
+  },
+  "backfill": {
+    "comment": "Fills the dashboard back over `days`, one run every `stepDays` (matches the ongoing ~twice-weekly cadence). The flagship news (informed) diets run every `informedStepDays`-th run using real historical headlines (NewsAPI/GDELT) for that day. days = how far back.",
+    "days": 30,
+    "stepDays": 3,
+    "informedStepDays": 1,
+    "fillPoolCap": 10
+  }
+}

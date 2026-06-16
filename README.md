@@ -2,97 +2,102 @@
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-000000?style=flat-square&logo=next.js&logoColor=white)](https://nextjs.org/)
-[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
+[![Supabase](https://img.shields.io/badge/Supabase-Postgres-3ECF8E?style=flat-square&logo=supabase&logoColor=white)](https://supabase.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](./LICENSE)
 
-**Silicon Pulse** is a small research dashboard for running the *same* original survey battery across many LLMs over time - baseline (no news) and optional left / balanced / right news briefs before the same questions. The pipeline is designed to run on a schedule: update the model list, build digests, call models, classify open-ended answers into coarse themes, and optionally generate a short run briefing. The site is meant to read like an autonomous panel: what you see are **model completions**, not human poll results.
+Silicon Pulse asks the same set of survey questions to a bunch of LLMs on a schedule and tracks how their answers move over time. Every question is asked with no news (baseline), and the flagship models also get asked again with recent news headlines (left / balanced / right) added in front. Everything on the site is model output, not a human poll.
 
-I built it to watch how answers cluster, how they move when the information environment changes, and how that shifts between runs when the underlying model roster changes.
+I built it to see how much the models agree, how news context shifts their answers, and how that changes as the model lineup updates.
 
----
+## What's in here
 
-## What you get
+- Next.js dashboard: latest run snapshot, per-question answer distributions, longitudinal charts, model comparison, the model registry, and a methodology page.
+- Supabase (Postgres) for surveys, runs, responses, news briefs, and digests.
+- OpenRouter for the model calls. The roster is 5 flagship anchors, a usage-ranked pool, and some open-weights models. Anchors are sampled a few times per question so you get a distribution instead of a single answer; the other models answer once. The news conditions only run on the anchors. All the knobs (caps, cadence, cheap helper models) are in [`src/config/survey-config.json`](./src/config/survey-config.json).
+- A news-brief builder (NewsAPI, with GDELT as a fallback) for the three feeds.
+- A backfill script to fill the dashboard with past-dated runs.
+- A theme classifier for the open-ended "priorities" question, and an optional run digest written by a cheap model.
 
-- **Next.js** UI: latest run snapshot, answer overview, per-question breakdowns, longitudinal stacks, pairwise comparison, model registry
-- **Supabase** for surveys, runs, responses, briefs, and optional run digests
-- **OpenRouter** for model calls; registry sync picks from active text-generation models (with caps: baseline surveys up to 15 models, informed/news conditions up to 15 per slice to keep spend predictable)
-- **RSS → briefs** script for the three informed feeds
-- **Post-run** theme classification for the open “priorities” item and an optional **digest** article authored by a designated model from aggregate stats
+This is not legal, medical, or electoral advice. See the in-app About page.
 
-Nothing here is legal, medical, or electoral advice - see the in-app **About → Disclaimer** before relying on anything for decisions.
+## Setup
 
----
-
-## Quick start
-
-**Prerequisites:** Node 20+, a [Supabase](https://supabase.com) project, and an [OpenRouter](https://openrouter.ai) API key.
+You need Node 20+, a [Supabase](https://supabase.com) project, and an [OpenRouter](https://openrouter.ai) key.
 
 ```bash
 git clone https://github.com/MaxMLang/silicon-pulse.git
 cd silicon-pulse
 npm install
 cp .env.local.example .env.local
-# Fill in Supabase URL, anon key, service role key, OpenRouter key
+# fill in the keys
 ```
 
-Apply SQL migrations in order (`supabase/migrations/`) in the Supabase SQL editor - start with `001`, then `002` if your project needs it, then `003` if you use run digests.
+Run the SQL files in [`supabase/migrations/`](./supabase/migrations) in order (001 through 008) in the Supabase SQL editor. Migration 006 turns on row-level security (public read, writes only with the secret key). Skip it and the dashboard reads zero rows.
+
+Keys: new Supabase projects give you a publishable key (`sb_publishable_...`) and a secret key (`sb_secret_...`). Both the new env names (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`) and the old ones (`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) work.
+
+Then:
 
 ```bash
-npm run update-models
-npm run build-briefs
-npm run run-survey
+npm run update-models           # sync the OpenRouter roster + flagship anchors
+npm run build-briefs            # balanced / left / right news briefs
+npm run run-survey              # baseline + (anchors-only) informed conditions
 npm run classify-priority-themes
-npm run generate-run-digest   # optional
-npm run dev
-# http://localhost:3000
+npm run generate-run-digest     # optional, uses a cheap author model
+npm run dev                     # http://localhost:3000
 ```
 
-Or one shot: `npm run full-run` (runs the shell script that chains the steps above in order).
+Or `npm run full-run` to do all of it in order.
 
----
+### Backfill
+
+Fills the dashboard with past dates. It stamps each run with its date, picks the anchor models that were live then, and pulls that day's real headlines for the news conditions. Run `update-models` first.
+
+```bash
+npm run backfill -- --dry-run                          # preview the dates, write nothing
+npm run backfill                                       # default: 30 days, one run every 3 days
+npm run backfill -- --days 14                          # custom window
+npm run backfill -- --step 1                           # daily instead of every 3 days
+npm run backfill -- --from 2026-05-17 --to 2026-06-16  # explicit window (handy for chunking)
+```
 
 ## Scheduled runs (GitHub Actions)
 
-The repo includes [`.github/workflows/survey-run.yml`](.github/workflows/survey-run.yml). The job uses **Node.js 24** and sets `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` so Actions stays on a supported runtime as GitHub phases out Node 20. It wakes **every day at 09:00 UTC**, but the survey only runs when the schedule says so:
+[`.github/workflows/survey-run.yml`](./.github/workflows/survey-run.yml) runs the full pipeline (survey, classify, digest) on a cron: Mondays and Thursdays at 09:00 UTC. You can also trigger it by hand from the Actions tab with "Run workflow", which skips the gate.
 
-- Set **`burstStart`** in [`survey-schedule.json`](./survey-schedule.json) to an ISO date (`"YYYY-MM-DD"`, interpreted in UTC) on the **first day** you want the initial **7-day daily** data-gathering window. After that week (seven calendar days starting that day), scheduled runs switch to **Mondays only** at the same time.
-- Leave **`burstStart` as `null`** to skip the burst and use **weekly Mondays only** from the start.
-- **Bootstrap:** scheduled runs do nothing until the **`runs`** table has at least one row. After deploy, run **Survey run** manually once (`workflow_dispatch`); after that, the cron can run according to the rules above. Manual runs always execute the full pipeline.
+The only gate on scheduled runs is bootstrap: nothing runs until the `runs` table has at least one row, so trigger it manually once (or do a backfill) first. The job runs on Node 24.
 
-You can always run the pipeline manually (`workflow_dispatch`); that ignores the calendar gate and bootstrap. Set these **repository secrets**:
+Add these repository secrets under Settings > Secrets and variables > Actions:
 
-| Secret | Purpose |
-|--------|---------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Public anon key (used where the client expects it) |
-| `SUPABASE_SERVICE_ROLE_KEY` | Service role - required for scripts |
-| `OPENROUTER_API_KEY` | Model API |
+| Secret | Required | What it is |
+|--------|----------|------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | yes | Supabase project URL |
+| `SUPABASE_SERVICE_ROLE_KEY` | yes | Supabase secret/service key (an `sb_secret_...` value is fine here) |
+| `OPENROUTER_API_KEY` | yes | model calls |
+| `NEWS_API_KEY` | no | NewsAPI key for briefs; falls back to GDELT if unset |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | no | publishable/anon key |
 
-To use a different **steady-state** cadence than weekly Mondays, adjust the `Schedule gate` step and/or the cron in the workflow, or disable the schedule and run manually.
+## Deploy (Vercel)
 
----
+Import the repo in Vercel, set `NEXT_PUBLIC_SUPABASE_URL` and the publishable/anon key (that's all the read-only site needs), and deploy. The data pipeline runs from GitHub Actions, not from Vercel.
 
-## Project layout
+## Layout
 
 ```
 silicon-pulse/
-├── src/app/           # Next.js App Router pages
-├── src/components/    # UI
-├── src/lib/           # Types, Supabase client, queries
-├── scripts/           # update-models, build-briefs, run-survey, classify, digest
-├── supabase/migrations/
-├── survey-schedule.json  # GitHub Actions: burst window for daily-then-weekly runs
+├── src/app/                  # Next.js pages, including /methodology
+├── src/components/           # UI
+├── src/lib/                  # types, Supabase client, queries, config loader, anchors
+├── src/config/
+│   ├── anchor-models.json    # one flagship per lab, with dated cutover segments
+│   └── survey-config.json    # cost / cadence / model knobs in one place
+├── scripts/                  # update-models, build-briefs, run-survey, backfill, classify, digest
+├── supabase/migrations/      # 001 through 008
 └── scripts/full-run.sh
 ```
 
----
+## License
 
-## Contributing & citation
+MIT, see [`LICENSE`](./LICENSE). News text and third-party APIs keep their own terms.
 
-Issues and PRs are welcome. If you use this in academic work, cite the repository and the run date you used. The codebase is under the **MIT License** - see [`LICENSE`](./LICENSE). Underlying news text and third-party APIs remain subject to their own terms.
-
----
-
-## Author
-
-**MaxMLang** - [GitHub](https://github.com/MaxMLang)
+Built by [MaxMLang](https://github.com/MaxMLang).

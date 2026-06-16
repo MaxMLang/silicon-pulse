@@ -6,7 +6,11 @@
       "segments": [
         {
           "modelId": "openai/gpt-5.4",
-          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+          "effectiveFrom": "2026-03-05T00:00:00.000Z"
+        },
+        {
+          "modelId": "openai/gpt-5.5",
+          "effectiveFrom": "2026-04-24T00:00:00.000Z"
         }
       ]
     },
@@ -16,11 +20,15 @@
       "segments": [
         {
           "modelId": "anthropic/claude-opus-4.6",
-          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+          "effectiveFrom": "2026-02-04T00:00:00.000Z"
         },
         {
           "modelId": "anthropic/claude-opus-4.7",
           "effectiveFrom": "2026-04-16T00:00:00.000Z"
+        },
+        {
+          "modelId": "anthropic/claude-opus-4.8",
+          "effectiveFrom": "2026-05-27T00:00:00.000Z"
         }
       ]
     },
@@ -30,7 +38,7 @@
       "segments": [
         {
           "modelId": "google/gemini-3.1-pro-preview",
-          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+          "effectiveFrom": "2026-02-19T00:00:00.000Z"
         }
       ]
     },
@@ -40,7 +48,11 @@
       "segments": [
         {
           "modelId": "x-ai/grok-4.20",
-          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+          "effectiveFrom": "2026-03-31T00:00:00.000Z"
+        },
+        {
+          "modelId": "x-ai/grok-4.3",
+          "effectiveFrom": "2026-04-30T00:00:00.000Z"
         }
       ]
     },
@@ -50,7 +62,15 @@
       "segments": [
         {
           "modelId": "deepseek/deepseek-chat-v3-0324",
-          "effectiveFrom": "2026-04-15T00:00:00.000Z"
+          "effectiveFrom": "2025-03-24T00:00:00.000Z"
+        },
+        {
+          "modelId": "deepseek/deepseek-v3.2",
+          "effectiveFrom": "2025-12-01T00:00:00.000Z"
+        },
+        {
+          "modelId": "deepseek/deepseek-v4-pro",
+          "effectiveFrom": "2026-04-24T00:00:00.000Z"
         }
       ]
     }

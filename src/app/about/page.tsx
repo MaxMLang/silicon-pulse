@@ -101,10 +101,11 @@ export default async function AboutPage() {
           <p>
             A run is one batch: models are drawn from the registry, optional digests are attached, then each
             question is asked under each condition. <strong className="text-zinc-300">Baseline</strong> uses no news
-            text and includes up to <strong className="text-zinc-300">15</strong> models.{' '}
-            <strong className="text-zinc-300">Informed</strong> conditions (balanced / left / right digests) use the
-            same question text with up to <strong className="text-zinc-300">15</strong> models per slice to keep the
-            news-assisted portion bounded. Temperature is 0.
+            text and covers the flagship anchors plus a small usage-ranked fill pool.{' '}
+            <strong className="text-zinc-300">Informed</strong> conditions (balanced / left / right digests) reuse
+            the same question text but, to keep spend low, run on the{' '}
+            <strong className="text-zinc-300">flagship anchors only</strong> by default. Temperature is 0. All caps
+            live in <code className="text-zinc-300 text-xs">survey-config.json</code>.
           </p>
           <p className="text-xs text-zinc-500">
             Failures and refusals appear as gaps in the data rather than silent drops.
@@ -119,17 +120,16 @@ export default async function AboutPage() {
           </p>
           <p>
             <strong className="text-zinc-300">How models are selected.</strong> The panel is drawn from{' '}
-            <strong className="text-zinc-300">OpenRouter</strong>: we take the{' '}
-            <strong className="text-zinc-300">top 15</strong> eligible models on their public leaderboard (models are
-            listed <strong className="text-zinc-300">by weekly usage</strong> on OpenRouter). On each sync we fetch that
-            list, then filter to <strong className="text-zinc-300">text-generation</strong> chat endpoints only: we drop
-            embeddings and rerankers, image or audio generators, non-instruct &quot;base&quot; checkpoints, free-tier
-            endpoints, and models without enough context length or a positive per-token price. We then{' '}
-            <strong className="text-zinc-300">deduplicate by model family</strong> (one representative per lineage, in
-            OpenRouter&apos;s usage order) so we keep fifteen <strong className="text-zinc-300">different families</strong>{' '}
-            rather than fifteen variants of the same stack. Those 15 become the active roster until the next sync. A survey
-            run uses up to 15 models for <strong className="text-zinc-300">baseline</strong> and up to 15 for each{' '}
-            <strong className="text-zinc-300">informed</strong> slice (same pool), so caps stay predictable.
+            <strong className="text-zinc-300">OpenRouter</strong>: we take the top eligible models on their public
+            leaderboard (models are listed <strong className="text-zinc-300">by weekly usage</strong>). On each sync we
+            fetch that list, then filter to <strong className="text-zinc-300">text-generation</strong> chat endpoints
+            only: we drop embeddings and rerankers, image or audio generators, non-instruct &quot;base&quot;
+            checkpoints, free-tier endpoints, and models without enough context length or a positive per-token price. We
+            then <strong className="text-zinc-300">deduplicate by model family</strong> (one representative per lineage,
+            in usage order) so we keep <strong className="text-zinc-300">different families</strong> rather than variants
+            of the same stack. The active roster is the flagship anchors plus that usage-ranked pool. Exact counts (the
+            usage-pool size and the baseline fill cap) are set in{' '}
+            <code className="text-zinc-300 text-xs">survey-config.json</code>.
           </p>
           <p>
             We record provider, origin where available, and rough capability metadata. Participation in a run is
@@ -168,9 +168,9 @@ export default async function AboutPage() {
           <p>
             Each survey run <strong className="text-zinc-300">always includes</strong> those flagships first (they are
             deduplicated against the leaderboard so the same id is not counted twice), then the{' '}
-            <strong className="text-zinc-300">top-15-by-usage</strong> family pool fills the remaining slots up to the
-            cap. That way the panel mixes “what people are using this week” with “what each big lab is shipping as its
-            headline model.”
+            <strong className="text-zinc-300">top-by-usage</strong> family pool fills the remaining slots up to the
+            configured cap. That way the panel mixes “what people are using this week” with “what each big lab is
+            shipping as its headline model.”
           </p>
           <p>
             When a lab releases a new default model, maintainers record a <strong className="text-zinc-300">cutover</strong>{' '}

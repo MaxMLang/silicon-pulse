@@ -12,13 +12,14 @@
 import { createClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
 import { PRIORITY_THEMES } from '../src/lib/types'
+import { surveyConfig } from '../src/lib/survey-config'
 dotenv.config({ path: '.env.local' })
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)!
 
-const CLASSIFIER_MODEL = 'anthropic/claude-haiku-4-5'
+const CLASSIFIER_MODEL = surveyConfig.models.classifier
 const BATCH_SIZE = 20
 const BATCH_DELAY_MS = 500
 

@@ -16,6 +16,8 @@ import { createClient } from '@supabase/supabase-js'
 import * as dotenv from 'dotenv'
 import type { AnchorModelsFile } from '../src/lib/anchor-models.types'
 import { currentModelIdForLab } from '../src/lib/anchor-models'
+import { surveyConfig } from '../src/lib/survey-config'
+import { isOpenWeights } from '../src/lib/open-weights'
 dotenv.config({ path: '.env.local' })
 
 function loadAnchorConfig(): AnchorModelsFile {
@@ -25,11 +27,11 @@ function loadAnchorConfig(): AnchorModelsFile {
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const SUPABASE_SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY)!
 
-const MIN_CONTEXT_LENGTH = 8192
-/** Keep in sync with BASELINE_MODEL_CAP in scripts/run-survey.ts */
-const TARGET_MODEL_COUNT = 15
+const MIN_CONTEXT_LENGTH = surveyConfig.registry.minContextLength
+/** Number of usage-ranked families kept active (anchors are added on top). From survey-config.json. */
+const TARGET_MODEL_COUNT = surveyConfig.registry.targetModelCount
 
 // Models to always skip (base models, moderation, embedding, image-only)
 const EXCLUDED_FAMILIES = new Set([
@@ -49,6 +51,9 @@ const BASE_MODEL_PATTERNS = [
   /pretrain/i,
   /foundation/i,
 ]
+
+// Exclude special-purpose models that aren't general assistants (e.g. creative-writing "fable" line).
+const EXCLUDED_ID_SUBSTRINGS = ['fable']
 
 // Provider → origin mapping (best-effort)
 const PROVIDER_ORIGIN: Record<string, string> = {
@@ -163,9 +168,20 @@ function isTextGenerationModel(m: any): boolean {
     return false
   }
 
-  const modality = (m.architecture?.modality ?? '').toLowerCase()
-  if (modality) {
-    if (!modality.includes('text')) return false
+  // Must OUTPUT text. The naive `modality.includes('text')` check is wrong because image generators
+  // are listed as "text->image" (text input) and would pass. Inspect the output side explicitly.
+  const out: string[] = Array.isArray(m.architecture?.output_modalities)
+    ? m.architecture.output_modalities.map((x: string) => String(x).toLowerCase())
+    : []
+  if (out.length > 0) {
+    if (!out.includes('text')) return false
+  } else {
+    // Fall back to the "input->output" modality string and check only the output half.
+    const modality = (m.architecture?.modality ?? '').toLowerCase()
+    if (modality) {
+      const outputHalf = modality.includes('->') ? modality.split('->').pop()! : modality
+      if (!outputHalf.includes('text')) return false
+    }
   }
 
   return true
@@ -199,6 +215,8 @@ async function main() {
     if (isBaseModel(m.id, m.name)) return false
     // Skip free tier (unreliable, rate-limited, not representative)
     if (m.id.endsWith(':free')) return false
+    // Skip special-purpose / non-assistant models (e.g. creative-writing "fable")
+    if (EXCLUDED_ID_SUBSTRINGS.some(s => m.id.toLowerCase().includes(s))) return false
     // Must have a real price
     const price = parseFloat(m.pricing?.prompt ?? '0')
     if (price <= 0) return false
@@ -243,7 +261,10 @@ async function main() {
 
   const today = new Date().toISOString().split('T')[0]
 
-  function rowFromApi(m: any, extra: { anchor_lab: string | null; usage_rank: number | null }) {
+  function rowFromApi(
+    m: any,
+    extra: { anchor_lab: string | null; usage_rank: number | null; active?: boolean }
+  ) {
     const provider = inferProvider(m.id)
     return {
       id: m.id,
@@ -253,12 +274,34 @@ async function main() {
       parameter_count: inferParameterCount(m.id),
       origin: inferOrigin(provider),
       last_seen: today,
-      active: true,
+      active: extra.active ?? true,
       context_length: m.context_length ?? null,
       pricing_prompt: parseFloat(m.pricing?.prompt ?? '0') || null,
       pricing_completion: parseFloat(m.pricing?.completion ?? '0') || null,
       anchor_lab: extra.anchor_lab,
       usage_rank: extra.usage_rank,
+      open_weights: isOpenWeights(m.id),
+    }
+  }
+
+  /** Minimal registry row for a historical anchor id that is no longer on OpenRouter (keeps backfill FKs valid). */
+  function syntheticRow(modelId: string) {
+    const provider = inferProvider(modelId)
+    return {
+      id: modelId,
+      display_name: modelId.split('/').pop() ?? modelId,
+      provider,
+      family: inferFamily(modelId),
+      parameter_count: inferParameterCount(modelId),
+      origin: inferOrigin(provider),
+      last_seen: today,
+      active: false,
+      context_length: null,
+      pricing_prompt: null,
+      pricing_completion: null,
+      anchor_lab: null as string | null,
+      usage_rank: null as number | null,
+      open_weights: isOpenWeights(modelId),
     }
   }
 
@@ -276,34 +319,44 @@ async function main() {
     process.exit(1)
   }
 
-  // Flagship anchors (merge leaderboard rank when the same model appears in both)
+  // Flagship anchors: seed the CURRENT flagship per lab (active, anchor_lab set) plus every HISTORICAL
+  // segment id (inactive, anchor_lab null) so the backfill can reference past endpoints via FK even
+  // when they are retired from OpenRouter.
   const anchorConfig = loadAnchorConfig()
   const anchorRows: ReturnType<typeof rowFromApi>[] = []
+  const seededAnchorIds = new Set<string>()
   for (const def of anchorConfig.anchors) {
-    const mid = currentModelIdForLab(def)
-    const apiModel = allModels.find((x: any) => x.id === mid)
-    const lbIdx = selected.findIndex((x: any) => x.id === mid)
-    const usage_rank = lbIdx >= 0 ? lbIdx + 1 : null
-    if (!apiModel) {
-      console.warn(`⚠️ Anchor not found on OpenRouter: ${mid} (${def.displayLabel}) — fix anchor-models.json`)
-      continue
-    }
-    if (!isTextGenerationModel(apiModel) || isBaseModel(apiModel.id, apiModel.name ?? '')) {
-      console.warn(`⚠️ Anchor failed eligibility checks: ${mid} (${def.displayLabel})`)
-      continue
-    }
-    const price = parseFloat(apiModel.pricing?.prompt ?? '0')
-    const ctx = apiModel.context_length ?? 0
-    if (ctx < MIN_CONTEXT_LENGTH) {
-      console.warn(`⚠️ Anchor skipped (context < ${MIN_CONTEXT_LENGTH}): ${mid}`)
-      continue
-    }
-    if (price <= 0) {
-      console.warn(
-        `⚠️ Anchor ${mid} has $0 prompt rate — upserting anyway so the flagship stays in the registry`
+    const currentId = currentModelIdForLab(def)
+    for (const seg of def.segments) {
+      const mid = seg.modelId
+      if (seededAnchorIds.has(mid)) continue
+      seededAnchorIds.add(mid)
+      const isCurrent = mid === currentId
+      const apiModel = allModels.find((x: any) => x.id === mid)
+
+      if (!apiModel) {
+        if (isCurrent) {
+          console.warn(`⚠️ Current anchor not found on OpenRouter: ${mid} (${def.displayLabel}) — fix anchor-models.json`)
+        } else {
+          console.log(`   ↳ historical anchor ${mid} retired from OpenRouter — seeding minimal row for backfill FKs`)
+        }
+        anchorRows.push(syntheticRow(mid))
+        continue
+      }
+
+      if (isCurrent && (!isTextGenerationModel(apiModel) || isBaseModel(apiModel.id, apiModel.name ?? ''))) {
+        console.warn(`⚠️ Anchor failed eligibility checks: ${mid} (${def.displayLabel})`)
+      }
+      const lbIdx = selected.findIndex((x: any) => x.id === mid)
+      const usage_rank = isCurrent && lbIdx >= 0 ? lbIdx + 1 : null
+      anchorRows.push(
+        rowFromApi(apiModel, {
+          anchor_lab: isCurrent ? def.lab : null,
+          usage_rank,
+          active: isCurrent,
+        })
       )
     }
-    anchorRows.push(rowFromApi(apiModel, { anchor_lab: def.lab, usage_rank }))
   }
 
   if (anchorRows.length > 0) {
