@@ -13,6 +13,10 @@ export interface OptionShare {
   color: string
 }
 
+/** Bucket for draws that landed on no listed option (refusal, empty, or unparseable reply). */
+export const DECLINED_LABEL = 'Declined / no clear answer'
+const DECLINED_COLOR = '#52525b'
+
 export interface ModelConviction {
   modelId: string
   modelName: string
@@ -26,7 +30,12 @@ export interface ModelConviction {
   distribution: { name: string; count: number; color: string }[]
 }
 
-/** Aggregate share of each option across ALL draws (every sample counts), preserving option order. */
+/**
+ * Aggregate share of each option across ALL draws (every sample counts), preserving option order.
+ * Draws that don't land on a listed option (refusal, empty, unparseable) are kept as a "Declined /
+ * no clear answer" bucket so the total reflects every draw, not just the clean ones. Rows with an
+ * infrastructure error (no reply at all) are excluded - those aren't a model choice.
+ */
 export function optionShares(
   responses: Response[],
   options: string[],
@@ -34,18 +43,31 @@ export function optionShares(
 ): { shares: OptionShare[]; total: number } {
   const counts: Record<string, number> = {}
   let total = 0
+  let declined = 0
   for (const r of responses) {
-    if (!r.answer) continue
-    counts[r.answer] = (counts[r.answer] ?? 0) + 1
+    if (r.error) continue
     total++
+    if (r.answer && options.includes(r.answer)) {
+      counts[r.answer] = (counts[r.answer] ?? 0) + 1
+    } else {
+      declined++
+    }
   }
   const denom = total || 1
-  const shares = options.map(opt => ({
+  const shares: OptionShare[] = options.map(opt => ({
     name: opt,
     count: counts[opt] ?? 0,
     pct: Math.round(((counts[opt] ?? 0) / denom) * 100),
     color: colors[opt] ?? '#94a3b8',
   }))
+  if (declined > 0) {
+    shares.push({
+      name: DECLINED_LABEL,
+      count: declined,
+      pct: Math.round((declined / denom) * 100),
+      color: DECLINED_COLOR,
+    })
+  }
   return { shares, total }
 }
 
@@ -67,13 +89,14 @@ export function modelConvictions(
 ): ModelConviction[] {
   const byModel = new Map<string, { name: string; counts: Record<string, number>; draws: number }>()
   for (const r of responses) {
-    if (!r.answer) continue
+    if (r.error) continue
     let m = byModel.get(r.model_id)
     if (!m) {
       m = { name: r.model_name, counts: {}, draws: 0 }
       byModel.set(r.model_id, m)
     }
-    m.counts[r.answer] = (m.counts[r.answer] ?? 0) + 1
+    const ans = r.answer && options.includes(r.answer) ? r.answer : DECLINED_LABEL
+    m.counts[ans] = (m.counts[ans] ?? 0) + 1
     m.draws++
   }
 
@@ -87,9 +110,13 @@ export function modelConvictions(
         topAnswer = ans
       }
     }
-    const distribution = options
+    const distribution = [...options, DECLINED_LABEL]
       .filter(opt => (m.counts[opt] ?? 0) > 0)
-      .map(opt => ({ name: opt, count: m.counts[opt] ?? 0, color: colors[opt] ?? '#94a3b8' }))
+      .map(opt => ({
+        name: opt,
+        count: m.counts[opt] ?? 0,
+        color: opt === DECLINED_LABEL ? DECLINED_COLOR : colors[opt] ?? '#94a3b8',
+      }))
     out.push({
       modelId,
       modelName: m.name,
