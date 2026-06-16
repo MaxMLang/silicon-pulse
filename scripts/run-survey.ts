@@ -40,6 +40,8 @@ const args = process.argv.slice(2)
 const DRY_RUN = args.includes('--dry-run')
 /** Backfill: skip informed conditions because historical news briefs do not exist. */
 const BASELINE_ONLY = args.includes('--baseline-only')
+/** Skip the same-day guard and run even if a completed run already exists for this date. */
+const FORCE = args.includes('--force')
 const MODEL_LIMIT = (() => {
   const idx = args.indexOf('--models')
   return idx >= 0 ? parseInt(args[idx + 1]) : null
@@ -596,6 +598,29 @@ async function main() {
   // 4. Create run record (stamp past date for backfill runs)
   let runId = 'dry-run'
   if (!DRY_RUN) {
+    // Idempotency guard: don't create a second run for a date that already has a completed one.
+    // (A failed/partial run for the same date is allowed to be retried.) Override with --force.
+    if (!FORCE) {
+      const targetDay = (RUN_DATE ?? new Date()).toISOString().slice(0, 10)
+      const { data: recentRuns } = await supabase
+        .from('runs')
+        .select('id, run_date, created_at, status')
+        .order('created_at', { ascending: false })
+        .limit(50)
+      const existing = (recentRuns ?? []).find(
+        r =>
+          ((r.run_date ?? r.created_at) as string | null)?.slice(0, 10) === targetDay &&
+          r.status === 'complete'
+      )
+      if (existing) {
+        console.log(
+          `A completed run already exists for ${targetDay} (${(existing.id as string).slice(0, 8)}). ` +
+            `Skipping to avoid a duplicate. Pass --force to run anyway.`
+        )
+        return
+      }
+    }
+
     const runRow: Record<string, unknown> = {
       status: 'running',
       model_list: baselineModels.map((m: Model) => m.id),
