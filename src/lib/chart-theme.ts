@@ -2,18 +2,22 @@
 // One source of truth for chart colors + Recharts styling so every visualization across the app
 // (home questions, longitudinal, priorities, digest) looks consistent. Tuned for the zinc-950 dark UI.
 
-/** Categorical palette for answer options / themes. Bright-but-soft so it reads on a dark background. */
+/**
+ * Categorical palette for answer options / themes, tuned for the dark UI.
+ * Ordered so the first entries are maximally separated in hue (most questions have 3-5 options),
+ * with only one color per hue family so nothing reads as a near-duplicate.
+ */
 export const SERIES_COLORS = [
-  '#60a5fa', // blue-400
-  '#34d399', // emerald-400
-  '#fbbf24', // amber-400
-  '#f87171', // red-400
-  '#a78bfa', // violet-400
-  '#22d3ee', // cyan-400
-  '#fb923c', // orange-400
-  '#f472b6', // pink-400
-  '#a3e635', // lime-400
-  '#94a3b8', // slate-400 (overflow / "other")
+  '#4f9dff', // blue
+  '#ff7a1a', // orange
+  '#2dd36f', // green
+  '#f0529c', // pink / magenta
+  '#b06bff', // purple
+  '#f5c518', // gold
+  '#ff5d5d', // red
+  '#18c7cf', // teal
+  '#a3e635', // lime
+  '#94a3b8', // slate (overflow / "other")
 ]
 
 /** Stable color for the option at a given index (wraps around if there are more options than colors). */
@@ -31,7 +35,7 @@ export function colorMap(labels: string[]): Record<string, string> {
 }
 
 /** Accent used for single-series "share" bars and primary highlights. */
-export const ACCENT = '#60a5fa'
+export const ACCENT = '#4f9dff'
 
 // Recharts shared styling --------------------------------------------------------
 

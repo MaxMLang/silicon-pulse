@@ -22,19 +22,20 @@ import { PRIORITY_THEMES } from '@/lib/types'
 import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 
+// Distinct hue per theme (no two in the same family), aligned with the shared chart palette.
 const CATEGORY_COLORS: Record<string, string> = {
-  Economy: '#3b82f6',
-  'Government/Leadership': '#8b5cf6',
-  Immigration: '#f59e0b',
-  Healthcare: '#10b981',
-  'Crime/Violence': '#ef4444',
-  Education: '#06b6d4',
-  'Environment/Climate': '#22c55e',
-  'National Security': '#f97316',
-  'Race Relations': '#ec4899',
-  'Poverty/Inequality': '#a78bfa',
-  Other: '#71717a',
-  'Declined to answer or unclear': '#52525b',
+  Economy: '#4f9dff', // blue
+  'Government/Leadership': '#b06bff', // purple
+  Immigration: '#ff7a1a', // orange
+  Healthcare: '#2dd36f', // green
+  'Crime/Violence': '#ff5d5d', // red
+  Education: '#18c7cf', // teal
+  'Environment/Climate': '#a3e635', // lime
+  'National Security': '#f5c518', // gold
+  'Race Relations': '#f0529c', // pink
+  'Poverty/Inequality': '#b07a4a', // brown
+  Other: '#71717a', // grey
+  'Declined to answer or unclear': '#52525b', // dark grey
 }
 
 interface ThemeDistribution {
