@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
+import { format, parseISO } from 'date-fns'
 import { getAllModels } from '@/lib/queries'
+import { getAnchorConfig, sortSegmentsByEffectiveFrom } from '@/lib/anchor-models'
+
+const shortModelId = (id: string) => id.split('/').pop() ?? id
 
 export const metadata = {
   title: 'Methodology - Silicon Pulse',
@@ -40,6 +44,7 @@ const STEPS = [
 export default async function MethodologyPage() {
   const models = await getAllModels()
   const active = models.filter(m => m.active)
+  const anchors = getAnchorConfig().anchors
 
   return (
     <div className="max-w-3xl space-y-12">
@@ -94,7 +99,54 @@ export default async function MethodologyPage() {
         </p>
       </Section>
 
-      <Section id="questions" n="02" title="What we ask">
+      <Section id="anchor-changes" n="02" title="Flagship anchor changelog">
+        <p>
+          One headline model per lab anchors the longitudinal series. When a lab ships a new default, we record a{' '}
+          <strong className="text-zinc-300">cutover</strong> with an effective date, so a shift in a chart reflects a
+          changed endpoint rather than an unexplained jump. The full history is below.
+        </p>
+        <div className="space-y-2 not-prose">
+          {anchors.map(def => {
+            const segs = sortSegmentsByEffectiveFrom(def)
+            const current = segs[segs.length - 1]
+            const changes = segs.length - 1
+            return (
+              <details key={def.lab} className="group rounded-lg border border-zinc-800 bg-zinc-900/20">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-2.5">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium text-zinc-200">{def.displayLabel}</span>
+                    <span className="truncate font-mono text-xs text-zinc-500">{shortModelId(current.modelId)}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2 text-[11px] text-zinc-600">
+                    {changes > 0 ? `${changes} cutover${changes > 1 ? 's' : ''}` : 'no changes yet'}
+                    <span className="inline-block transition-transform group-open:rotate-180">⌄</span>
+                  </span>
+                </summary>
+                <ol className="divide-y divide-zinc-800/60 border-t border-zinc-800">
+                  {[...segs].reverse().map((seg, i) => (
+                    <li
+                      key={`${seg.modelId}-${seg.effectiveFrom}`}
+                      className="flex items-center justify-between gap-3 px-4 py-2 text-xs"
+                    >
+                      <span className="font-mono text-zinc-300">{shortModelId(seg.modelId)}</span>
+                      <span className="shrink-0 text-zinc-500">
+                        {i === 0 && <span className="text-emerald-400/80">current · </span>}
+                        from {format(parseISO(seg.effectiveFrom), 'MMM d, yyyy')}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )
+          })}
+        </div>
+        <p className="text-xs text-zinc-500">
+          See these handoffs marked inline on the{' '}
+          <Link href="/longitudinal" className="text-zinc-300 underline-offset-2 hover:underline">longitudinal view</Link>.
+        </p>
+      </Section>
+
+      <Section id="questions" n="03" title="What we ask">
         <p>
           Mostly closed-form items across a deliberately <strong className="text-zinc-300">broad range of
           topics</strong> - technology and AI, the economy, institutions and the media, the environment,
@@ -110,7 +162,7 @@ export default async function MethodologyPage() {
         </p>
       </Section>
 
-      <Section id="conditions" n="03" title="Baseline vs. news diets">
+      <Section id="conditions" n="04" title="Baseline vs. news diets">
         <p>
           Every item is asked <strong className="text-zinc-300">baseline</strong> (no news) and again under
           three <strong className="text-zinc-300">informed</strong> conditions, where a short briefing built
@@ -126,7 +178,7 @@ export default async function MethodologyPage() {
         </p>
       </Section>
 
-      <Section id="scoring" n="04" title="Reading the results">
+      <Section id="scoring" n="05" title="Reading the results">
         <p>
           We don&apos;t score answers against a &ldquo;correct&rdquo; human distribution. The signal is{' '}
           <strong className="text-zinc-300">comparative</strong>: how much the panel agrees vs. spreads, how
@@ -141,7 +193,7 @@ export default async function MethodologyPage() {
         </p>
       </Section>
 
-      <Section id="limits" n="05" title="Limits & honest caveats">
+      <Section id="limits" n="06" title="Limits & honest caveats">
         <ul className="list-disc pl-4 space-y-2">
           <li>These are model completions under one protocol - not human opinion, and not model &ldquo;beliefs.&rdquo;</li>
           <li>Flagship models are sampled several times per question; other models answer once.</li>

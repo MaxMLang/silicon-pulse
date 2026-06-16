@@ -77,7 +77,7 @@ export default async function AboutPage() {
             <a href="#no-role-prompts" className="text-zinc-200 underline-offset-2 hover:underline">
               Why we don&apos;t use role-based prompts
             </a>{' '}
-            for research context on synthetic survey data and limits of human-mimicry designs.
+            for why we read the models raw, with no persona.
           </p>
         </Accordion>
 
@@ -196,35 +196,15 @@ export default async function AboutPage() {
             45-year-old from…”) or to imitate a human respondent. That design choice is deliberate.
           </p>
           <p>
-            Research that uses LLMs to fabricate <strong className="text-zinc-300">synthetic survey-style data</strong>,
-            or to stand in for human samples with carefully engineered prompts, has shown{' '}
-            <strong className="text-zinc-300">serious limits</strong>: systematic bias, weak alignment with real
-            populations, and poor reliability as a drop-in for human polling. In work on German voter behavior,{' '}
-            <strong className="text-zinc-300">Leah von der Heyde</strong>, <strong className="text-zinc-300">Anna-Carolina Haensch</strong>, and colleagues document these problems for LLM-generated synthetic datasets and related uses of language models to estimate opinion (e.g.{' '}
-            <a
-              href="https://arxiv.org/abs/2407.08563"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-zinc-200 underline-offset-2 hover:underline"
-            >
-              von der Heyde, Haensch &amp; Wenz, 2024
-            </a>
-            ; see also their analysis of bias in LLM-based synthetic survey data, e.g.{' '}
-            <a
-              href="https://osf.io/preprints/socarxiv/97r8s_v1"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-zinc-200 underline-offset-2 hover:underline"
-            >
-              Assessing bias in LLM-generated synthetic datasets
-            </a>
-            ).
+            We care about what the models say <strong className="text-zinc-300">raw</strong>, with no persona attached.
+            That is how people actually use them. Most people never prompt a model to act like some voter or fill a
+            quota; they just open it and ask things while working or chatting, the way you would with a co-worker.
           </p>
           <p>
-            That line of inquiry - whether and how LLMs can <strong className="text-zinc-300">mimic humans</strong> for
-            survey research - is <strong className="text-zinc-300">important</strong>. This project is motivated
-            differently: see <a href="#why" className="text-zinc-200 underline-offset-2 hover:underline">Why Silicon Pulse</a>{' '}
-            for the neutral-protocol framing and what we are trying to measure instead.
+            So the answer a model gives by default, unprompted, is the one that actually reaches people every day. That
+            is what we want to track over time, with and without news context. See{' '}
+            <a href="#why" className="text-zinc-200 underline-offset-2 hover:underline">Why Silicon Pulse</a> for more on
+            what we are measuring.
           </p>
         </Accordion>
 
