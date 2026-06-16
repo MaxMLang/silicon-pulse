@@ -22,7 +22,6 @@ import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
 import { PRIORITIES_QUESTION_ID } from '@/lib/priorities-constants'
 import {
   getAnchorConfig,
-  handoffDatesForLab,
   historicalModelIdsForLab,
 } from '@/lib/anchor-models'
 
@@ -120,6 +119,112 @@ function TrendChart({
         </LineChart>
       </ResponsiveContainer>
     </ChartShell>
+  )
+}
+
+function hexToRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.replace('#', ''), 16)
+  const r = (n >> 16) & 255
+  const g = (n >> 8) & 255
+  const b = n & 255
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+/** Per-question comparison: rows = each lab's flagship, columns = runs, cell = that model's modal answer. */
+function AnchorAnswerMatrix({
+  anchorDefs,
+  points,
+  feedType,
+  options,
+  colors,
+}: {
+  anchorDefs: { lab: string; displayLabel: string }[]
+  points: RunPoint[]
+  feedType: FeedType
+  options: string[]
+  colors: Record<string, string>
+}) {
+  const scoped = points.filter(p => p.feedType === feedType && p.anchorLab != null)
+  const dates = [...new Set(scoped.map(p => p.runDate))].sort(
+    (a, b) => new Date(a).getTime() - new Date(b).getTime()
+  )
+  if (dates.length === 0) {
+    return (
+      <div className="flex items-center gap-2">
+        <FeedBadge feedType={feedType} />
+        <span className="text-xs text-zinc-600">No flagship responses for this diet in the loaded runs.</span>
+      </div>
+    )
+  }
+
+  function modal(lab: string, date: string): { answer: string; share: number } | null {
+    const pt = scoped.find(p => p.anchorLab === lab && p.runDate === date)
+    if (!pt) return null
+    let top = ''
+    let topV = 0
+    for (const o of options) {
+      const v = pt.answerDist[o] ?? 0
+      if (v > topV) {
+        topV = v
+        top = o
+      }
+    }
+    return top ? { answer: top, share: Math.round(topV) } : null
+  }
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-3">
+        <FeedBadge feedType={feedType} />
+        <span className="ml-2 text-xs text-zinc-500">{FEED_LABELS[feedType]}</span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="text-[11px] border-separate border-spacing-1">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 bg-zinc-950 text-left text-zinc-500 font-medium px-2">Flagship</th>
+              {dates.map(d => (
+                <th key={d} className="text-zinc-500 font-medium px-1 whitespace-nowrap text-center">
+                  {format(new Date(d), 'MMM d')}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {anchorDefs.map(def => (
+              <tr key={def.lab}>
+                <th className="sticky left-0 z-10 bg-zinc-950 text-left text-zinc-300 font-medium px-2 whitespace-nowrap">
+                  {def.displayLabel}
+                </th>
+                {dates.map(d => {
+                  const c = modal(def.lab, d)
+                  if (!c) {
+                    return (
+                      <td key={d} className="p-0">
+                        <div className="min-w-[2.75rem] h-8 rounded bg-zinc-900/40 text-zinc-700 flex items-center justify-center">
+                          ·
+                        </div>
+                      </td>
+                    )
+                  }
+                  return (
+                    <td key={d} className="p-0">
+                      <div
+                        className="min-w-[2.75rem] h-8 rounded flex items-center justify-center font-mono tabular-nums text-zinc-50"
+                        style={{ backgroundColor: hexToRgba(colors[c.answer] ?? '#94a3b8', 0.3 + 0.65 * (c.share / 100)) }}
+                        title={`${def.displayLabel} · ${format(new Date(d), 'MMM d, yyyy')}: ${c.answer} (${c.share}% of draws)`}
+                      >
+                        {c.share}%
+                      </div>
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }
 
@@ -399,12 +504,19 @@ export default function LongitudinalPage() {
         <div className="space-y-8">
           <div className="rounded border border-zinc-800 p-6 min-w-0">
             <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
-              {selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey)
-                ? 'Classified theme share over time'
-                : 'Answer share over time'}
+              {viewMode === 'anchors'
+                ? 'How each flagship answered, by run'
+                : selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey)
+                  ? 'Classified theme share over time'
+                  : 'Answer share over time'}
             </h2>
             <p className="text-xs text-zinc-600 mb-6">
-              {selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey) ? (
+              {viewMode === 'anchors' ? (
+                <>
+                  Each row is one lab&apos;s flagship; each cell is its most common answer that run (color = answer,
+                  shade = how many of its repeated draws agreed). One grid per selected news diet.
+                </>
+              ) : selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey) ? (
                 <>
                   Each line is a classified policy theme (not raw text); the y-axis is its share of responses for
                   that run. One chart per selected news diet.
@@ -442,55 +554,30 @@ export default function LongitudinalPage() {
                       </div>
                     )
                   })
-                : anchorDefs.map(def => (
-                    <div key={def.lab} className="space-y-8 min-w-0">
-                      <h3 className="text-sm font-medium text-zinc-300 border-b border-zinc-800 pb-2">
-                        {def.displayLabel}
-                      </h3>
-                      {selectedFeeds.map(feedType => {
-                        const data = lineRowsForScope(feedType, def.lab)
-                        const handoffRefs: { x: string; label: string }[] = []
-                        if (data.length > 0) {
-                          for (const h of handoffDatesForLab(def)) {
-                            const t0 = new Date(h.at).getTime()
-                            const row = data.find(d => new Date(String(d.fullDate)).getTime() >= t0)
-                            if (row) handoffRefs.push({ x: String(row.fullDate), label: h.label })
-                          }
-                        }
-                        if (!selectedSurvey || data.length === 0) {
-                          return (
-                            <div key={`${def.lab}-${feedType}`} className="min-w-0">
-                              <div className="flex items-center gap-2 mb-3">
-                                <FeedBadge feedType={feedType} />
-                                <span className="text-xs text-zinc-600">
-                                  No flagship responses for this lab and diet in the loaded runs.
-                                </span>
-                              </div>
-                            </div>
-                          )
-                        }
-                        return (
-                          <div key={`${def.lab}-${feedType}`} className="min-w-0">
-                            <div className="mb-3">
-                              <FeedBadge feedType={feedType} />
-                              <span className="ml-2 text-xs text-zinc-500">{FEED_LABELS[feedType]}</span>
-                            </div>
-                            <TrendChart
-                              data={data}
-                              options={segmentKeys as string[]}
-                              colors={optionColors}
-                              handoffRefs={handoffRefs}
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
+                : selectedFeeds.map(feedType => (
+                    <AnchorAnswerMatrix
+                      key={feedType}
+                      anchorDefs={anchorDefs}
+                      points={runs}
+                      feedType={feedType}
+                      options={segmentKeys as string[]}
+                      colors={optionColors}
+                    />
                   ))}
+            </div>
+            {/* Shared answer-color legend */}
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-6 pt-4 border-t border-zinc-800/60">
+              {(segmentKeys as string[]).map(opt => (
+                <span key={opt} className="inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
+                  <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: optionColors[opt] }} />
+                  {opt}
+                </span>
+              ))}
             </div>
             <p className="text-xs text-zinc-600 mt-6">
               {viewMode === 'pooled'
                 ? 'Each point aggregates all models under that news diet for that run.'
-                : 'Each point is one run for that lab’s flagship (all segment model ids in config), under that news diet.'}
+                : 'Cells show the % of that flagship’s repeated draws landing on its top answer — darker means more internally consistent.'}
             </p>
           </div>
 
