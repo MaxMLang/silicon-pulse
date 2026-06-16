@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   Legend, CartesianGrid, ReferenceLine,
 } from 'recharts'
 import { format } from 'date-fns'
@@ -13,6 +13,9 @@ import { conditionForFeed } from '@/lib/feed'
 import { FeedBadge } from '@/components/feed-badge'
 import { EmptyState } from '@/components/empty-state'
 import { ChartShell } from '@/components/chart-shell'
+import {
+  colorMap, AXIS_TICK, AXIS_LINE, GRID_STROKE, TOOLTIP_STYLE, TOOLTIP_LABEL_STYLE,
+} from '@/lib/chart-theme'
 import type { Survey, FeedType } from '@/lib/types'
 import { PRIORITY_THEMES } from '@/lib/types'
 import { normalizePriorityThemeLabel } from '@/lib/priority-theme-display'
@@ -31,19 +34,6 @@ const FEED_LABELS: Record<FeedType, string> = {
   right: 'Right-leaning',
 }
 
-/** Distinct fills for answer-option segments (same across feeds). */
-const OPTION_STACK_COLORS = [
-  '#3b82f6',
-  '#818cf8',
-  '#f87171',
-  '#22c55e',
-  '#eab308',
-  '#a855f7',
-  '#06b6d4',
-  '#f472b6',
-  '#94a3b8',
-]
-
 interface RunPoint {
   runId: string
   runDate: string
@@ -57,6 +47,80 @@ interface RunPoint {
 /** Open priorities item: chart/table use classifier themes, not raw free text. */
 function isOpenPrioritiesSurvey(s: Survey): boolean {
   return !s.options?.length || s.question_id === PRIORITIES_QUESTION_ID
+}
+
+/** Multi-line trend: one line per answer option (or theme), share % on Y, run date on X. */
+function TrendChart({
+  data,
+  options,
+  colors,
+  handoffRefs = [],
+}: {
+  data: Record<string, string | number>[]
+  options: string[]
+  colors: Record<string, string>
+  handoffRefs?: { x: string; label: string }[]
+}) {
+  return (
+    <ChartShell h={300}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
+          <CartesianGrid stroke={GRID_STROKE} strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="fullDate"
+            tick={AXIS_TICK}
+            axisLine={AXIS_LINE}
+            tickLine={false}
+            tickFormatter={v => format(new Date(String(v)), 'MMM d')}
+            interval="preserveStartEnd"
+            minTickGap={24}
+          />
+          <YAxis
+            tick={AXIS_TICK}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={v => `${v}%`}
+            domain={[0, 100]}
+            width={40}
+          />
+          <Tooltip
+            contentStyle={TOOLTIP_STYLE}
+            labelStyle={TOOLTIP_LABEL_STYLE}
+            labelFormatter={(_l, payload) =>
+              payload?.[0]?.payload?.fullDate
+                ? format(new Date(String(payload[0].payload.fullDate)), 'MMM d, yyyy')
+                : ''
+            }
+            formatter={(v, name) => [`${v ?? 0}%`, String(name ?? '')]}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#a1a1aa', paddingTop: 8 }} />
+          {handoffRefs.map((hr, hi) => (
+            <ReferenceLine
+              key={hi}
+              x={hr.x}
+              stroke="#a1a1aa"
+              strokeDasharray="4 4"
+              label={{ value: hr.label, fill: '#a1a1aa', fontSize: 10, position: 'insideTopRight' }}
+            />
+          ))}
+          {options.map(opt => (
+            <Line
+              key={opt}
+              type="monotone"
+              dataKey={opt}
+              name={opt}
+              stroke={colors[opt]}
+              strokeWidth={2}
+              dot={{ r: 2.5, fill: colors[opt], strokeWidth: 0 }}
+              activeDot={{ r: 4 }}
+              connectNulls
+              isAnimationActive={false}
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </ChartShell>
+  )
 }
 
 export default function LongitudinalPage() {
@@ -185,11 +249,11 @@ export default function LongitudinalPage() {
       ? [...PRIORITY_THEMES]
       : selectedSurvey.options
     : []
+  const optionColors = colorMap(segmentKeys as string[])
 
-  /** One row per run date that has data for this feed; values are % shares summing to 100 for a full stack. */
-  function stackedRowsForFeed(feedType: FeedType, anchorLab?: string) {
-    if (!selectedSurvey) return []
-    const options = segmentKeys
+  /** One row per run date for a feed/scope: { fullDate, [option]: % share }. Used by the line chart. */
+  function lineRowsForScope(feedType: FeedType, anchorLab?: string) {
+    if (!selectedSurvey) return [] as Record<string, string | number>[]
     const scopeRuns = runs.filter(r => {
       if (r.feedType !== feedType) return false
       if (anchorLab !== undefined) return r.anchorLab === anchorLab
@@ -200,26 +264,10 @@ export default function LongitudinalPage() {
     )
     return dates.map(date => {
       const point = scopeRuns.find(r => r.runDate === date)
-      const row: Record<string, string | number> = {
-        date: format(new Date(date), 'MMM d'),
-        fullDate: date,
+      const row: Record<string, string | number> = { fullDate: date }
+      for (const opt of segmentKeys) {
+        row[opt] = point ? Math.round(point.answerDist[opt] ?? 0) : 0
       }
-      const raw = options.map(o => (point ? (point.answerDist[o] ?? 0) : 0))
-      const sum = raw.reduce((a, b) => a + b, 0)
-      if (sum === 0) {
-        for (const opt of options) row[opt] = 0
-        return row
-      }
-      let acc = 0
-      options.forEach((opt, i) => {
-        if (i < options.length - 1) {
-          const v = Math.round((raw[i]! / sum) * 100)
-          acc += v
-          row[opt] = v
-        } else {
-          row[opt] = 100 - acc
-        }
-      })
       return row
     })
   }
@@ -229,8 +277,8 @@ export default function LongitudinalPage() {
     !!selectedSurvey &&
     selectedFeeds.length > 0 &&
     (viewMode === 'pooled'
-      ? selectedFeeds.some(ft => stackedRowsForFeed(ft).length > 0)
-      : anchorDefs.some(def => selectedFeeds.some(ft => stackedRowsForFeed(ft, def.lab).length > 0)))
+      ? selectedFeeds.some(ft => lineRowsForScope(ft).length > 0)
+      : anchorDefs.some(def => selectedFeeds.some(ft => lineRowsForScope(ft, def.lab).length > 0)))
 
   return (
     <div>
@@ -352,26 +400,26 @@ export default function LongitudinalPage() {
           <div className="rounded border border-zinc-800 p-6 min-w-0">
             <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
               {selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey)
-                ? 'Classified theme mix over time (100% stacked)'
-                : 'Answer mix over time (100% stacked)'}
+                ? 'Classified theme share over time'
+                : 'Answer share over time'}
             </h2>
             <p className="text-xs text-zinc-600 mb-6">
               {selectedSurvey && isOpenPrioritiesSurvey(selectedSurvey) ? (
                 <>
-                  Segments are classified policy themes (not raw text). Each column is one run; shares sum to 100%.
-                  Columns are flush between runs. One chart per selected news diet.
+                  Each line is a classified policy theme (not raw text); the y-axis is its share of responses for
+                  that run. One chart per selected news diet.
                 </>
               ) : (
                 <>
-                  Each column is one run; segments are answer shares (sum to 100%). Columns are flush left-to-right
-                  with no gap between runs. One chart per selected news diet.
+                  Each line is one answer option; the y-axis is its share of the panel for that run. One chart per
+                  selected news diet.
                 </>
               )}
             </p>
             <div className="space-y-10">
               {viewMode === 'pooled'
                 ? selectedFeeds.map(feedType => {
-                    const data = stackedRowsForFeed(feedType)
+                    const data = lineRowsForScope(feedType)
                     if (!selectedSurvey || data.length === 0) {
                       return (
                         <div key={feedType} className="min-w-0">
@@ -390,61 +438,7 @@ export default function LongitudinalPage() {
                           <FeedBadge feedType={feedType} />
                           <span className="ml-2 text-xs text-zinc-500">{FEED_LABELS[feedType]}</span>
                         </div>
-                        <ChartShell h={300}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={data}
-                              margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
-                              barCategoryGap={0}
-                            >
-                              <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
-                              <XAxis
-                                dataKey="fullDate"
-                                tick={{ fill: '#71717a', fontSize: 11 }}
-                                axisLine={{ stroke: '#3f3f46' }}
-                                tickLine={false}
-                                tickFormatter={v => format(new Date(String(v)), 'MMM d')}
-                                interval={data.length > 16 ? 'preserveStartEnd' : 0}
-                              />
-                              <YAxis
-                                tick={{ fill: '#71717a', fontSize: 11 }}
-                                axisLine={false}
-                                tickLine={false}
-                                tickFormatter={v => `${v}%`}
-                                domain={[0, 100]}
-                              />
-                              <Tooltip
-                                contentStyle={{
-                                  background: '#18181b',
-                                  border: '1px solid #3f3f46',
-                                  borderRadius: 6,
-                                  fontSize: 11,
-                                }}
-                                labelFormatter={(_l, payload) =>
-                                  payload?.[0]?.payload?.fullDate
-                                    ? format(new Date(String(payload[0].payload.fullDate)), 'MMM d, yyyy')
-                                    : ''
-                                }
-                                formatter={(v, name) => [`${v ?? 0}%`, String(name ?? '')]}
-                              />
-                              <Legend
-                                wrapperStyle={{ fontSize: 11, color: '#71717a' }}
-                                formatter={value => String(value)}
-                              />
-                              {segmentKeys.map((opt, i) => (
-                                <Bar
-                                  key={opt}
-                                  dataKey={opt}
-                                  name={opt}
-                                  stackId={feedType}
-                                  fill={OPTION_STACK_COLORS[i % OPTION_STACK_COLORS.length]}
-                                  stroke="#09090b"
-                                  strokeWidth={0.5}
-                                />
-                              ))}
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </ChartShell>
+                        <TrendChart data={data} options={segmentKeys as string[]} colors={optionColors} />
                       </div>
                     )
                   })
@@ -454,7 +448,7 @@ export default function LongitudinalPage() {
                         {def.displayLabel}
                       </h3>
                       {selectedFeeds.map(feedType => {
-                        const data = stackedRowsForFeed(feedType, def.lab)
+                        const data = lineRowsForScope(feedType, def.lab)
                         const handoffRefs: { x: string; label: string }[] = []
                         if (data.length > 0) {
                           for (const h of handoffDatesForLab(def)) {
@@ -475,77 +469,18 @@ export default function LongitudinalPage() {
                             </div>
                           )
                         }
-                        const stackId = `${def.lab}-${feedType}`
                         return (
                           <div key={`${def.lab}-${feedType}`} className="min-w-0">
                             <div className="mb-3">
                               <FeedBadge feedType={feedType} />
                               <span className="ml-2 text-xs text-zinc-500">{FEED_LABELS[feedType]}</span>
                             </div>
-                            <ChartShell h={300}>
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart
-                                  data={data}
-                                  margin={{ top: 4, right: 8, bottom: 4, left: 0 }}
-                                  barCategoryGap={0}
-                                >
-                                  <CartesianGrid stroke="#27272a" strokeDasharray="3 3" vertical={false} />
-                                  <XAxis
-                                    dataKey="fullDate"
-                                    tick={{ fill: '#71717a', fontSize: 11 }}
-                                    axisLine={{ stroke: '#3f3f46' }}
-                                    tickLine={false}
-                                    tickFormatter={v => format(new Date(String(v)), 'MMM d')}
-                                    interval={data.length > 16 ? 'preserveStartEnd' : 0}
-                                  />
-                                  <YAxis
-                                    tick={{ fill: '#71717a', fontSize: 11 }}
-                                    axisLine={false}
-                                    tickLine={false}
-                                    tickFormatter={v => `${v}%`}
-                                    domain={[0, 100]}
-                                  />
-                                  <Tooltip
-                                    contentStyle={{
-                                      background: '#18181b',
-                                      border: '1px solid #3f3f46',
-                                      borderRadius: 6,
-                                      fontSize: 11,
-                                    }}
-                                    labelFormatter={(_l, payload) =>
-                                      payload?.[0]?.payload?.fullDate
-                                        ? format(new Date(String(payload[0].payload.fullDate)), 'MMM d, yyyy')
-                                        : ''
-                                    }
-                                    formatter={(v, name) => [`${v ?? 0}%`, String(name ?? '')]}
-                                  />
-                                  <Legend
-                                    wrapperStyle={{ fontSize: 11, color: '#71717a' }}
-                                    formatter={value => String(value)}
-                                  />
-                                  {handoffRefs.map((hr, hi) => (
-                                    <ReferenceLine
-                                      key={hi}
-                                      x={hr.x}
-                                      stroke="#a1a1aa"
-                                      strokeDasharray="4 4"
-                                      label={{ value: hr.label, fill: '#a1a1aa', fontSize: 10 }}
-                                    />
-                                  ))}
-                                  {segmentKeys.map((opt, i) => (
-                                    <Bar
-                                      key={opt}
-                                      dataKey={opt}
-                                      name={opt}
-                                      stackId={stackId}
-                                      fill={OPTION_STACK_COLORS[i % OPTION_STACK_COLORS.length]}
-                                      stroke="#09090b"
-                                      strokeWidth={0.5}
-                                    />
-                                  ))}
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </ChartShell>
+                            <TrendChart
+                              data={data}
+                              options={segmentKeys as string[]}
+                              colors={optionColors}
+                              handoffRefs={handoffRefs}
+                            />
                           </div>
                         )
                       })}
@@ -554,8 +489,8 @@ export default function LongitudinalPage() {
             </div>
             <p className="text-xs text-zinc-600 mt-6">
               {viewMode === 'pooled'
-                ? 'Each column aggregates all models under that news diet for that run.'
-                : 'Each column is one run for that lab’s flagship (all segment model ids in config), under that news diet.'}
+                ? 'Each point aggregates all models under that news diet for that run.'
+                : 'Each point is one run for that lab’s flagship (all segment model ids in config), under that news diet.'}
             </p>
           </div>
 

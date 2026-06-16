@@ -15,6 +15,9 @@ const OVERRIDE_AUTHOR = process.env.DIGEST_AUTHOR_MODEL_ID?.trim() || surveyConf
 const args = process.argv.slice(2)
 const RUN_IDX = args.indexOf('--run-id')
 const TARGET_RUN_ID = RUN_IDX >= 0 ? args[RUN_IDX + 1] : null
+/** --all: (re)generate a digest for every completed run. --force: overwrite runs that already have one. */
+const ALL_RUNS = args.includes('--all')
+const FORCE = args.includes('--force')
 
 interface RunRow {
   id: string
@@ -234,23 +237,80 @@ function makeExcerpt(body: string): string {
   return `${one.slice(0, 237)}…`
 }
 
+async function processRun(supabase: any, run: RunRow, surveys: SurveyRow[]): Promise<void> {
+  // PostgREST caps at 1000 rows/page; a run has a few thousand responses, so page through them all
+  // or the digest facts are computed from a truncated slice (and miss ~half the questions).
+  const responses: ResponseRow[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error: re } = await supabase
+      .from('responses')
+      .select('survey_id, answer, mip_category, feed_type, condition')
+      .eq('run_id', run.id)
+      .order('id')
+      .range(from, from + 999)
+    if (re) throw re
+    const rows = (data ?? []) as ResponseRow[]
+    responses.push(...rows)
+    if (rows.length < 1000) break
+  }
+
+  const author = await resolveAuthor(supabase, run)
+  const facts = await collectFacts(supabase, run, surveys, responses)
+
+  console.log(`  ${dateDisplay(run)} · ${author.display_name} · ${responses.length} responses`)
+
+  const body = await generateBody(author.id, facts)
+  const slug = buildSlug(run)
+
+  const row = {
+    run_id: run.id,
+    slug,
+    title: titleForRun(run),
+    run_date_display: dateDisplay(run),
+    author_model_id: author.id,
+    author_display_name: author.display_name,
+    body,
+    excerpt: makeExcerpt(body),
+  }
+
+  const { error: upErr } = await supabase.from('run_digests').upsert(row, { onConflict: 'run_id' })
+  if (upErr) throw upErr
+  console.log(`  saved: ${slug}`)
+}
+
 async function main() {
   console.log('Run digest')
-  if (OVERRIDE_AUTHOR) console.log(`Author override: ${OVERRIDE_AUTHOR}`)
+  if (OVERRIDE_AUTHOR) console.log(`Author: ${OVERRIDE_AUTHOR}`)
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
     auth: { persistSession: false },
   })
 
-  let run: RunRow | null = null
-  if (TARGET_RUN_ID) {
+  const { data: surveys, error: se } = await supabase
+    .from('surveys')
+    .select('id, question_id, question_text, topic, options, source')
+    .eq('active', true)
+  if (se) throw se
+  const surveyRows = (surveys ?? []) as SurveyRow[]
+
+  // Pick the runs to write digests for.
+  let runs: RunRow[] = []
+  if (ALL_RUNS) {
+    const { data, error } = await supabase
+      .from('runs')
+      .select('id, run_date, status, model_list')
+      .eq('status', 'complete')
+      .order('run_date', { ascending: true })
+    if (error) throw error
+    runs = (data ?? []) as RunRow[]
+  } else if (TARGET_RUN_ID) {
     const { data, error } = await supabase
       .from('runs')
       .select('id, run_date, status, model_list')
       .eq('id', TARGET_RUN_ID)
       .single()
     if (error) throw error
-    run = data as RunRow
+    runs = [data as RunRow]
   } else {
     const { data, error } = await supabase
       .from('runs')
@@ -260,50 +320,34 @@ async function main() {
       .limit(1)
       .single()
     if (error) throw error
-    run = data as RunRow
+    runs = [data as RunRow]
   }
 
-  if (!run || run.status !== 'complete') {
-    throw new Error('No suitable completed run found.')
+  runs = runs.filter(r => r && r.status === 'complete')
+  if (!runs.length) throw new Error('No suitable completed run found.')
+
+  // When generating for all runs, skip ones that already have a digest unless --force.
+  let existing = new Set<string>()
+  if (ALL_RUNS && !FORCE) {
+    const { data } = await supabase.from('run_digests').select('run_id')
+    existing = new Set((data ?? []).map((d: { run_id: string }) => d.run_id))
   }
 
-  const { data: surveys, error: se } = await supabase
-    .from('surveys')
-    .select('id, question_id, question_text, topic, options, source')
-    .eq('active', true)
-  if (se) throw se
-
-  const { data: responses, error: re } = await supabase
-    .from('responses')
-    .select('survey_id, answer, mip_category, feed_type, condition')
-    .eq('run_id', run.id)
-  if (re) throw re
-
-  const author = await resolveAuthor(supabase, run)
-  const facts = await collectFacts(supabase, run, (surveys ?? []) as SurveyRow[], (responses ?? []) as ResponseRow[])
-
-  console.log(`${dateDisplay(run)} · ${author.display_name}`)
-
-  const body = await generateBody(author.id, facts)
-  const slug = buildSlug(run)
-  const title = titleForRun(run)
-  const excerpt = makeExcerpt(body)
-
-  const row = {
-    run_id: run.id,
-    slug,
-    title,
-    run_date_display: dateDisplay(run),
-    author_model_id: author.id,
-    author_display_name: author.display_name,
-    body,
-    excerpt,
+  let done = 0
+  let skipped = 0
+  for (const run of runs) {
+    if (ALL_RUNS && !FORCE && existing.has(run.id)) {
+      skipped++
+      continue
+    }
+    try {
+      await processRun(supabase, run, surveyRows)
+      done++
+    } catch (err) {
+      console.error(`  FAILED ${dateDisplay(run)}:`, (err as Error).message)
+    }
   }
-
-  const { error: upErr } = await supabase.from('run_digests').upsert(row, { onConflict: 'run_id' })
-  if (upErr) throw upErr
-
-  console.log(`Saved: ${slug}`)
+  console.log(`Done. Wrote ${done} digest(s)${skipped ? `, skipped ${skipped} existing` : ''}.`)
 }
 
 main().catch(err => {
