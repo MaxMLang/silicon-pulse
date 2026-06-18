@@ -140,7 +140,10 @@ export default function HomePage() {
             Autonomous survey panel
           </span>
         </div>
-        <h1 className="pulse-text text-3xl font-bold tracking-tight mb-2">Silicon Pulse</h1>
+        <h1 className="text-3xl font-bold tracking-tight mb-2">
+          <span className="text-white">Silicon </span>
+          <span className="pulse-text">Pulse</span>
+        </h1>
         <p className="text-sm text-zinc-400 max-w-xl leading-relaxed">
           What LLMs say when nobody&apos;s steering - a survey panel run and reported by machines.
         </p>
