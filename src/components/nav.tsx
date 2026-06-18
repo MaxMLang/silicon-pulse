@@ -27,8 +27,9 @@ export function Nav() {
     <header className="sticky top-0 z-40 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur supports-[backdrop-filter]:bg-zinc-950/60">
       <div className="max-w-7xl mx-auto px-4 flex items-center gap-6 h-14">
         <Link href="/" className="flex items-center gap-2 shrink-0" onClick={() => setOpen(false)}>
-          <span className="relative flex h-2 w-2">
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="pulse-ring absolute inline-flex h-full w-full rounded-full bg-emerald-400" />
+            <span className="pulse-dot relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400" />
           </span>
           <span className="text-zinc-100 font-mono text-sm font-bold tracking-tight">SILICON PULSE</span>
         </Link>

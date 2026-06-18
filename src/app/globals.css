@@ -22,3 +22,31 @@ body {
 ::-webkit-scrollbar-track { background: #18181b; }
 ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+
+/* Header "pulse" indicator: dot that cycles hue + an expanding ring. */
+@keyframes silicon-pulse-hue {
+  0%, 100% { background-color: #34d399; box-shadow: 0 0 6px 1px rgba(52, 211, 153, 0.7); }
+  20%      { background-color: #22d3ee; box-shadow: 0 0 6px 1px rgba(34, 211, 238, 0.7); }
+  40%      { background-color: #818cf8; box-shadow: 0 0 6px 1px rgba(129, 140, 248, 0.7); }
+  60%      { background-color: #c084fc; box-shadow: 0 0 6px 1px rgba(192, 132, 252, 0.7); }
+  80%      { background-color: #f59e0b; box-shadow: 0 0 6px 1px rgba(245, 158, 11, 0.7); }
+}
+
+@keyframes silicon-pulse-ring {
+  0%   { transform: scale(1); opacity: 0.65; }
+  100% { transform: scale(2.8); opacity: 0; }
+}
+
+.pulse-dot {
+  animation: silicon-pulse-hue 6s ease-in-out infinite;
+}
+
+.pulse-ring {
+  animation:
+    silicon-pulse-ring 1.8s cubic-bezier(0, 0, 0.2, 1) infinite,
+    silicon-pulse-hue 6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pulse-dot, .pulse-ring { animation: none; }
+}

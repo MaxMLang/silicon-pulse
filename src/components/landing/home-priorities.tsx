@@ -238,6 +238,7 @@ export function HomePriorities({
                           axisLine={false}
                           tickLine={false}
                           width={135}
+                          interval={0}
                         />
                         <Tooltip
                           contentStyle={{
