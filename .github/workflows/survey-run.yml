@@ -38,6 +38,13 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
         run: |
+          # Strip any stray whitespace/newlines a pasted secret might carry; none of these values contain spaces.
+          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+          NEXT_PUBLIC_SUPABASE_URL=$(trim "$NEXT_PUBLIC_SUPABASE_URL")
+          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$(trim "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY")
+          SUPABASE_SECRET_KEY=$(trim "$SUPABASE_SECRET_KEY")
+          OPENROUTER_API_KEY=$(trim "$OPENROUTER_API_KEY")
+          NEWS_API_KEY=$(trim "$NEWS_API_KEY")
           test -n "$NEXT_PUBLIC_SUPABASE_URL" || (echo "Missing NEXT_PUBLIC_SUPABASE_URL secret" && exit 1)
           test -n "$SUPABASE_SECRET_KEY" || (echo "Missing SUPABASE_SECRET_KEY secret" && exit 1)
           test -n "$OPENROUTER_API_KEY" || (echo "Missing OPENROUTER_API_KEY secret" && exit 1)
@@ -65,10 +72,13 @@ jobs:
 
           # The cron itself sets the cadence (Mon & Thu). The only scheduled gate is bootstrap: don't run
           # on a schedule until at least one survey run exists (trigger the first run manually).
-          base="${SUPABASE_URL%/}"
+          # Strip any stray whitespace/newlines a pasted secret might carry (curl rejects those as malformed URLs).
+          base=$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]')
+          base="${base%/}"
+          key=$(printf '%s' "$SUPABASE_SECRET_KEY" | tr -d '[:space:]')
           resp=$(curl -fsS "${base}/rest/v1/runs?select=id&limit=1" \
-            -H "apikey: ${SUPABASE_SECRET_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_SECRET_KEY}" \
+            -H "apikey: ${key}" \
+            -H "Authorization: Bearer ${key}" \
             -H "Accept: application/json")
           n=$(echo "$resp" | jq 'length')
           if [ "$n" -eq 0 ]; then
