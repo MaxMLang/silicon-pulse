@@ -11,6 +11,10 @@
         {
           "modelId": "openai/gpt-5.5",
           "effectiveFrom": "2026-04-24T00:00:00.000Z"
+        },
+        {
+          "modelId": "openai/gpt-5.6-sol",
+          "effectiveFrom": "2026-07-09T00:00:00.000Z"
         }
       ]
     },
@@ -53,6 +57,10 @@
         {
           "modelId": "x-ai/grok-4.3",
           "effectiveFrom": "2026-04-30T00:00:00.000Z"
+        },
+        {
+          "modelId": "x-ai/grok-4.5",
+          "effectiveFrom": "2026-07-08T00:00:00.000Z"
         }
       ]
     },
